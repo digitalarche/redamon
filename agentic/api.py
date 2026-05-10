@@ -15,6 +15,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -1314,6 +1315,92 @@ async def test_mcp_server(server: dict):
             "warnings": [w.model_dump() for w in env_warnings],
         }
 
+    # Fast-fail check for stdio transport: missing/invalid `command`. The
+    # full diagnostic spawn happens only on real-MCP-client failure below.
+    if srv_obj.transport == "stdio" and not srv_obj.command:
+        return {
+            "ok": False,
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+            "discovered_tools": [],
+            "error": "stdio transport requires a `command`",
+            "warnings": [w.model_dump() for w in env_warnings],
+        }
+
+    def _stdio_diagnostic_stderr() -> Optional[str]:
+        """
+        Spawn the stdio MCP ourselves and capture stderr if it crashes.
+        Used only when the real MCP client failed, to translate the
+        SDK's opaque "Connection closed" into the actual reason
+        (missing API key, npm package not found, etc.).
+
+        Returns the formatted error string, or None if the process is
+        still running after the timeout (in which case it's not an
+        immediate-crash failure mode and we should fall back to the
+        upstream message).
+        """
+        if srv_obj.transport != "stdio" or not srv_obj.command:
+            return None
+        import subprocess
+        spawn_env = {**os.environ, **(srv_obj.env or {})}
+        try:
+            proc = subprocess.Popen(
+                [srv_obj.command, *list(srv_obj.args or [])],
+                env=spawn_env,
+                cwd=srv_obj.cwd or None,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except FileNotFoundError:
+            return (
+                f"command not found: '{srv_obj.command}'. Is it installed in "
+                f"the agent container? (e.g. for npx-based MCPs ensure node, "
+                f"for uvx ensure uv)"
+            )
+        except OSError as exc:
+            return f"failed to spawn '{srv_obj.command}': {exc}"
+        # Generous timeout: npx/uvx may need to fetch the package on first
+        # run before the actual MCP server starts up and immediately
+        # crashes on bad config. 25s covers cold cache for typical MCPs.
+        try:
+            stderr_text = proc.communicate(timeout=25.0)[1] or ""
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                pass
+            return None
+        # Pick the most informative slice of stderr. Node.js / Python
+        # tracebacks print the actual `Error: <message>` line ABOVE the
+        # stack trace, so a plain tail loses the message we care about.
+        # Strategy: surface any line that looks like an error message,
+        # then add the last few lines for context. Cap total length.
+        all_lines = [ln for ln in stderr_text.splitlines() if ln.strip()]
+        error_pattern = re.compile(
+            r"^\s*(?:[A-Z][a-zA-Z]*Error|Exception|Traceback|throw\b|"
+            r"FATAL|Cannot find|Missing|Required|environment variable)",
+        )
+        error_lines = [ln for ln in all_lines if error_pattern.search(ln)]
+        # Combine: deduplicated error lines (preserve order) + last 8 lines.
+        chosen: list[str] = []
+        seen: set[str] = set()
+        for ln in error_lines + all_lines[-8:]:
+            stripped = ln.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                chosen.append(stripped)
+        if not chosen:
+            chosen_str = "(no stderr output)"
+        else:
+            joined = " | ".join(chosen)
+            chosen_str = joined if len(joined) <= 1500 else joined[:1500] + "…"
+        return (
+            f"stdio MCP exited (code {proc.returncode}) before/during MCP "
+            f"handshake. stderr: {chosen_str}"
+        )
+
     client = None
     try:
         client = MultiServerMCPClient(config_dict)
@@ -1366,11 +1453,12 @@ async def test_mcp_server(server: dict):
             "warnings": warnings,
         }
     except asyncio.TimeoutError:
+        diag = _stdio_diagnostic_stderr()
         return {
             "ok": False,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
             "discovered_tools": [],
-            "error": "connection timed out after 30s",
+            "error": diag or "connection timed out after 30s",
             "warnings": [w.model_dump() for w in env_warnings],
         }
     except BaseExceptionGroup as group:  # noqa: F821 — Python 3.11+
@@ -1388,6 +1476,15 @@ async def test_mcp_server(server: dict):
         _flatten(group)
         msg = "; ".join(f"{type(e).__name__}: {e}" for e in leaves) or str(group)
         logger.warning(f"/mcp/test ExceptionGroup unwrapped: {msg}")
+        # For stdio "Connection closed"-style failures, the SDK swallows
+        # the subprocess stderr. Re-spawn ourselves to capture the real
+        # reason (missing API key, npm pkg not found, etc.).
+        if srv_obj.transport == "stdio" and (
+            "Connection closed" in msg or "ClosedResourceError" in msg or "BrokenPipe" in msg
+        ):
+            diag = _stdio_diagnostic_stderr()
+            if diag:
+                msg = diag
         return {
             "ok": False,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
@@ -1396,11 +1493,18 @@ async def test_mcp_server(server: dict):
             "warnings": [w.model_dump() for w in env_warnings],
         }
     except Exception as exc:
+        msg = f"{type(exc).__name__}: {exc}"
+        if srv_obj.transport == "stdio" and (
+            "Connection closed" in msg or "ClosedResource" in msg or "BrokenPipe" in msg
+        ):
+            diag = _stdio_diagnostic_stderr()
+            if diag:
+                msg = diag
         return {
             "ok": False,
             "elapsed_ms": int((time.monotonic() - started) * 1000),
             "discovered_tools": [],
-            "error": f"{type(exc).__name__}: {exc}",
+            "error": msg,
             "warnings": [w.model_dump() for w in env_warnings],
         }
     finally:

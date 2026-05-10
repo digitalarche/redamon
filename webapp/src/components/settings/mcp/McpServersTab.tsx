@@ -724,6 +724,21 @@ export default function McpServersTab({ userId }: Props) {
           </div>
         </label>
 
+        <label className={`${styles.field} ${styles.fieldWide}`}>
+          <span>tags (comma-separated, optional)</span>
+          <input
+            type="text"
+            value={(editing.tags || []).join(', ')}
+            onChange={e => updateField('tags',
+              e.target.value.split(',').map(s => s.trim()).filter(s => s !== ''),
+            )}
+            placeholder="osint, recon, threat-intel"
+          />
+          <span className={styles.muted} style={{ fontSize: '11px' }}>
+            Cosmetic labels shown on the server card. No functional effect.
+          </span>
+        </label>
+
         {isHttp && (
           <>
             <label className={`${styles.field} ${styles.fieldWide}`}>
@@ -778,6 +793,30 @@ export default function McpServersTab({ userId }: Props) {
                 Sent as <code>Authorization: Bearer …</code> on every MCP request.
               </span>
             </div>
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              <span>custom headers (one per line, <code>Header-Name: value</code>)</span>
+              <textarea
+                rows={3}
+                value={Object.entries(editing.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')}
+                onChange={e => {
+                  const next: Record<string, string> = {}
+                  for (const line of e.target.value.split('\n')) {
+                    const trimmed = line.trim()
+                    if (!trimmed) continue
+                    const colonIdx = trimmed.indexOf(':')
+                    if (colonIdx <= 0) continue
+                    const k = trimmed.slice(0, colonIdx).trim()
+                    const v = trimmed.slice(colonIdx + 1).trim()
+                    if (k) next[k] = v
+                  }
+                  updateField('headers', next)
+                }}
+                placeholder="X-Organization-ID: abc-123&#10;X-Custom-Tenant: my-team"
+              />
+              <span className={styles.muted} style={{ fontSize: '11px' }}>
+                Sent verbatim on every MCP request alongside the bearer token. Used by multi-tenant APIs (e.g. Censys requires <code>X-Organization-ID</code>).
+              </span>
+            </label>
           </>
         )}
 
@@ -810,6 +849,32 @@ export default function McpServersTab({ userId }: Props) {
                 onChange={e => updateField('cwd', e.target.value)}
                 placeholder="/tmp (optional)"
               />
+            </label>
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              <span>env vars (one per line, <code>KEY=VALUE</code>)</span>
+              <textarea
+                rows={4}
+                value={Object.entries(editing.env || {}).map(([k, v]) => `${k}=${v}`).join('\n')}
+                onChange={e => {
+                  const next: Record<string, string> = {}
+                  for (const line of e.target.value.split('\n')) {
+                    const trimmed = line.trim()
+                    if (!trimmed || trimmed.startsWith('#')) continue
+                    const eqIdx = trimmed.indexOf('=')
+                    if (eqIdx <= 0) continue
+                    const k = trimmed.slice(0, eqIdx).trim()
+                    const v = trimmed.slice(eqIdx + 1)
+                    if (k) next[k] = v
+                  }
+                  updateField('env', next)
+                }}
+                placeholder="SHODAN_API_KEY=kQDRu5etVi2vSb1LjopLSlIKDMRDFtkR&#10;ANOTHER_VAR=optional-second-line"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <span className={styles.muted} style={{ fontSize: '11px' }}>
+                Passed to the spawned process as environment variables. Used by stdio MCPs that read API keys from env (Shodan, VirusTotal, Snyk, etc.). Stored as plaintext in the DB.
+              </span>
             </label>
           </>
         )}

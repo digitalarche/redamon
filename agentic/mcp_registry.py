@@ -70,7 +70,7 @@ class BearerAuth(BaseModel):
     def _at_least_one(self) -> "BearerAuth":
         if not (self.token or self.token_env_var):
             raise ValueError(
-                "auth requires either 'token' (direct) or 'token_env_var' (env var name)"
+                "auth requires a non-empty 'token' (bearer token)"
             )
         return self
 

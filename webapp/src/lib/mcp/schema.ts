@@ -55,7 +55,7 @@ export const bearerAuthSchema = z.object({
 })
   .refine(
     v => !!(v.token && v.token.length > 0) || !!(v.token_env_var && v.token_env_var.length > 0),
-    { message: "auth requires either 'token' (direct) or 'token_env_var' (env var name)" },
+    { message: "auth requires a non-empty 'token' (bearer token)" },
   )
 
 export const mcpServerSchema = z.object({
