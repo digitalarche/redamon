@@ -14,6 +14,7 @@ forbidden-action stripping and escalation paths.
 
 import asyncio
 import logging
+import re
 from typing import Optional
 from uuid import uuid4
 
@@ -39,10 +40,13 @@ _TRANSIENT_EXC_NAMES = frozenset({
 _TRANSIENT_KEYWORDS = (
     "connection", "timeout", "timed out", "overloaded",
     "rate_limit", "rate limit", "apiconnectionerror",
-    "529", "503", "502", "500", "504",
     "service unavailable", "bad gateway", "gateway timeout",
     "internal server error", "server_error",
 )
+
+# Word-boundary match so "500" does not fire on "50000" (e.g. a max_tokens
+# error like "max_tokens 50000 exceeded" must NOT be classified transient).
+_TRANSIENT_STATUS_RE = re.compile(r"\b(429|500|502|503|504|529)\b")
 
 
 def _is_transient_llm_error(exc: BaseException) -> bool:
@@ -50,7 +54,9 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
         if base.__name__ in _TRANSIENT_EXC_NAMES:
             return True
     err_str = str(exc).lower()
-    return any(k in err_str for k in _TRANSIENT_KEYWORDS)
+    if any(k in err_str for k in _TRANSIENT_KEYWORDS):
+        return True
+    return bool(_TRANSIENT_STATUS_RE.search(err_str))
 
 
 # ---------- Exit nodes ----------
@@ -799,7 +805,8 @@ async def fireteam_member_think_node(
 
         response = None
         last_conn_exc = None
-        for _conn_attempt in range(3):
+        _MAX_CONN_ATTEMPTS = 3
+        for _conn_attempt in range(_MAX_CONN_ATTEMPTS):
             try:
                 response = await llm.ainvoke(llm_messages)
                 last_conn_exc = None
@@ -808,13 +815,14 @@ async def fireteam_member_think_node(
                 last_conn_exc = exc
                 is_transient = _is_transient_llm_error(exc)
                 logger.warning(
-                    "[%s] member %s LLM attempt %d/3 error (transient=%s, type=%s): %s",
-                    session_id, member_id, _conn_attempt + 1, is_transient,
-                    type(exc).__name__, exc,
+                    "[%s] member %s LLM attempt %d/%d error (transient=%s, type=%s): %s",
+                    session_id, member_id, _conn_attempt + 1, _MAX_CONN_ATTEMPTS,
+                    is_transient, type(exc).__name__, exc,
                 )
                 if not is_transient:
                     break
-                await asyncio.sleep(min(2 ** _conn_attempt, 8))
+                if _conn_attempt < _MAX_CONN_ATTEMPTS - 1:
+                    await asyncio.sleep(min(2 ** _conn_attempt, 8))
         if response is None:
             logger.error("[%s] member %s LLM call failed after 3 attempts: %s", session_id, member_id, last_conn_exc)
             return {
