@@ -29,6 +29,30 @@ from tools import set_tenant_context, set_phase_context, set_graph_view_context
 logger = logging.getLogger(__name__)
 
 
+_TRANSIENT_EXC_NAMES = frozenset({
+    "APIConnectionError", "APITimeoutError", "RateLimitError",
+    "InternalServerError", "ServiceUnavailableError", "OverloadedError",
+    "ConnectError", "ConnectTimeout", "ReadTimeout", "WriteTimeout",
+    "PoolTimeout", "TimeoutException", "RemoteProtocolError",
+})
+
+_TRANSIENT_KEYWORDS = (
+    "connection", "timeout", "timed out", "overloaded",
+    "rate_limit", "rate limit", "apiconnectionerror",
+    "529", "503", "502", "500", "504",
+    "service unavailable", "bad gateway", "gateway timeout",
+    "internal server error", "server_error",
+)
+
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    for base in type(exc).__mro__:
+        if base.__name__ in _TRANSIENT_EXC_NAMES:
+            return True
+    err_str = str(exc).lower()
+    return any(k in err_str for k in _TRANSIENT_KEYWORDS)
+
+
 # ---------- Exit nodes ----------
 
 async def fireteam_await_confirmation_node(
@@ -773,7 +797,6 @@ async def fireteam_member_think_node(
                 )
             ))
 
-        # P4 FIX: retry on transient LLM connection/overload errors before giving up.
         response = None
         last_conn_exc = None
         for _conn_attempt in range(3):
@@ -783,14 +806,11 @@ async def fireteam_member_think_node(
                 break
             except Exception as exc:
                 last_conn_exc = exc
-                err_str = str(exc).lower()
-                is_transient = any(s in err_str for s in [
-                    'connection', 'timeout', 'timed out', '529', 'overloaded',
-                    'rate_limit', 'rate limit', 'apiconnectionerror',
-                ])
+                is_transient = _is_transient_llm_error(exc)
                 logger.warning(
-                    "[%s] member %s LLM attempt %d/3 error (transient=%s): %s",
-                    session_id, member_id, _conn_attempt + 1, is_transient, exc
+                    "[%s] member %s LLM attempt %d/3 error (transient=%s, type=%s): %s",
+                    session_id, member_id, _conn_attempt + 1, is_transient,
+                    type(exc).__name__, exc,
                 )
                 if not is_transient:
                     break
