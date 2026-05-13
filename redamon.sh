@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 GVM_FLAG_FILE="$SCRIPT_DIR/.gvm-enabled"
 KBASE_FLAG_FILE="$SCRIPT_DIR/.kbase-enabled"
+KBASE_DISABLED_FLAG_FILE="$SCRIPT_DIR/.kbase-disabled"
 LEGACY_SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
@@ -60,26 +61,28 @@ is_kbase_enabled() {
 }
 
 # One-time migration from the legacy `.skipkbase` flag (RedAmon <=4.9.3) to the
-# new positive `.kbase-enabled` flag. Behavior preserved per case:
-#   - .skipkbase exists                      → was default install (KB off)  → just delete legacy flag
-#   - neither flag exists, but KB data on disk → was --kbase install (KB on) → create .kbase-enabled
-#   - .kbase-enabled exists                  → already migrated, no-op
-#   - fresh clone (no data, no flags)        → new default = KB off, no-op
-# Called from every command except cmd_install (which sets the flag explicitly).
+# new explicit flag pair (`.kbase-enabled` / `.kbase-disabled`). cmd_install
+# always writes one of the two markers so the user's explicit choice is sticky
+# across `clean` (which keeps KB data on disk). Behavior per case:
+#   - .kbase-enabled or .kbase-disabled exists → already migrated → no-op
+#   - .skipkbase exists                        → legacy default install (KB off) → convert to .kbase-disabled
+#   - no markers, FAISS index on disk          → legacy --kbase install (KB on)  → create .kbase-enabled
+#   - no markers, no data                      → fresh clone → create .kbase-disabled (README default)
+# Called from every command except cmd_install (which sets the markers explicitly).
 _migrate_legacy_kbase_flag() {
-    if [[ -f "$KBASE_FLAG_FILE" ]]; then
+    if [[ -f "$KBASE_FLAG_FILE" || -f "$KBASE_DISABLED_FLAG_FILE" ]]; then
         rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
         return
     fi
     if [[ -f "$LEGACY_SKIPKBASE_FLAG_FILE" ]]; then
         rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
+        touch "$KBASE_DISABLED_FLAG_FILE"
         return
     fi
-    # No new flag, no legacy flag — infer from KB data on disk. A populated
-    # FAISS index means the user previously ran `install --kbase`; preserve
-    # that across the upgrade so KB doesn't silently disappear.
     if [[ -s "$SCRIPT_DIR/knowledge_base/data/index.faiss" ]]; then
         touch "$KBASE_FLAG_FILE"
+    else
+        touch "$KBASE_DISABLED_FLAG_FILE"
     fi
 }
 
@@ -562,17 +565,20 @@ cmd_install() {
         info "Mode: Core services (without GVM/OpenVAS)"
         rm -f "$GVM_FLAG_FILE"
     fi
-    # KB is OPT-IN at install time. The `.kbase-enabled` flag drives every
-    # downstream command (update/up/up dev/status) so the install-time choice
-    # survives subsequent restarts. Always clean up any legacy `.skipkbase`
-    # flag from older installs.
+    # KB is OPT-IN at install time. The install always writes ONE of the two
+    # markers (.kbase-enabled or .kbase-disabled) so the user's explicit choice
+    # is sticky — `clean` keeps KB data on disk, and without an explicit
+    # "disabled" marker the migration heuristic would later see leftover FAISS
+    # data and re-enable KB. The legacy `.skipkbase` flag is removed.
     rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
     if [[ "$kbase_mode" == "true" ]]; then
         info "Mode: Including Knowledge Base (--kbase)"
         touch "$KBASE_FLAG_FILE"
+        rm -f "$KBASE_DISABLED_FLAG_FILE"
     else
         info "Mode: Skipping Knowledge Base (default; pass --kbase to enable)"
         rm -f "$KBASE_FLAG_FILE"
+        touch "$KBASE_DISABLED_FLAG_FILE"
     fi
     _kb_export_env
     echo ""
@@ -1042,6 +1048,7 @@ cmd_purge() {
 
     rm -f "$GVM_FLAG_FILE"
     rm -f "$KBASE_FLAG_FILE"
+    rm -f "$KBASE_DISABLED_FLAG_FILE"
     rm -f "$LEGACY_SKIPKBASE_FLAG_FILE"
     success "Full cleanup complete. All RedAmon data and images have been removed."
     echo ""
