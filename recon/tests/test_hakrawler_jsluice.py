@@ -8,6 +8,7 @@ real network/Docker calls (all external tools are mocked).
 import sys
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -471,6 +472,95 @@ def test_jsluice_run_filters_scope_and_cleans_up():
 
     mock_rmtree.assert_called_once()
     print("PASS: test_jsluice_run_filters_scope_and_cleans_up")
+
+
+def test_jsluice_filter_url_rejects_common_static_library_noise():
+    """filter_jsluice_url should skip obvious bundled library/static paths."""
+    from recon.helpers.resource_enum.jsluice_helpers import filter_jsluice_url
+
+    patterns = [
+        "/rxjs/",
+        "/node_modules/",
+        "/webpack",
+        ".map",
+        ".chunk.js",
+    ]
+
+    assert filter_jsluice_url("https://example.com/rxjs/static-5.10", patterns) is False
+    assert filter_jsluice_url("https://example.com/node_modules/lodash/index.js", patterns) is False
+    assert filter_jsluice_url("https://example.com/_next/static/chunks/app.chunk.js", patterns) is False
+    assert filter_jsluice_url("https://example.com/api/users", patterns) is True
+    assert filter_jsluice_url("https://example.com/dashboard/settings", patterns) is True
+    print("PASS: test_jsluice_filter_url_rejects_common_static_library_noise")
+
+
+def test_verify_jsluice_urls_filters_noise_and_unverified():
+    """verify_jsluice_urls should blacklist noise and keep only accepted HTTP statuses."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        output_file = temp_path / "verified.json"
+
+        def fake_run(cmd, **kwargs):
+            output_file.write_text(
+                "\n".join([
+                    json.dumps({"url": "https://example.com/api/live", "status_code": 200}),
+                    json.dumps({"url": "https://example.com/api/missing", "status_code": 404}),
+                    "",
+                ])
+            )
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            verified, stats = verify_jsluice_urls(
+                urls=[
+                    "https://example.com/api/live",
+                    "https://example.com/api/missing",
+                    "https://example.com/rxjs/static-5.10",
+                ],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10,
+                timeout=5,
+                rate_limit=50,
+                accept_status=[200, 201, 301, 302, 307, 308, 401, 403],
+                exclude_patterns=["/rxjs/"],
+            )
+
+    assert verified == {"https://example.com/api/live"}
+    assert stats["jsluice_verify_total"] == 3
+    assert stats["jsluice_skipped_blacklist"] == 1
+    assert stats["jsluice_verified"] == 1
+    assert stats["jsluice_skipped_unverified"] == 1
+    print("PASS: test_verify_jsluice_urls_filters_noise_and_unverified")
+
+
+def test_verify_jsluice_urls_fails_closed_on_httpx_error():
+    """If httpx verification fails, no jsluice URLs should be published."""
+    from recon.helpers.resource_enum.jsluice_helpers import verify_jsluice_urls
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        with mock.patch("recon.helpers.resource_enum.jsluice_helpers._create_temp_dir", return_value=temp_path), \
+             mock.patch("recon.helpers.resource_enum.jsluice_helpers._cleanup_temp_dir"), \
+             mock.patch("subprocess.run", side_effect=RuntimeError("docker failed")):
+            verified, stats = verify_jsluice_urls(
+                urls=["https://example.com/api/live"],
+                docker_image="projectdiscovery/httpx:latest",
+                threads=10,
+                timeout=5,
+                rate_limit=50,
+                accept_status=[200, 201, 301, 302, 307, 308, 401, 403],
+                exclude_patterns=[],
+            )
+
+    assert verified == set()
+    assert stats["jsluice_verify_total"] == 1
+    assert stats["jsluice_verified"] == 0
+    assert stats["jsluice_skipped_unverified"] == 1
+    print("PASS: test_verify_jsluice_urls_fails_closed_on_httpx_error")
 
 
 # ===========================================================================

@@ -62,8 +62,11 @@ from .hakrawler_helpers import (
 
 # jsluice helpers
 from .jsluice_helpers import (
+    DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
+    filter_jsluice_url,
     run_jsluice_analysis,
     merge_jsluice_into_by_base_url,
+    verify_jsluice_urls,
 )
 
 # FFuf helpers
@@ -123,8 +126,11 @@ __all__ = [
     "pull_hakrawler_docker_image",
     "merge_hakrawler_into_by_base_url",
     # jsluice
+    "DEFAULT_JSLUICE_EXCLUDE_PATTERNS",
+    "filter_jsluice_url",
     "run_jsluice_analysis",
     "merge_jsluice_into_by_base_url",
+    "verify_jsluice_urls",
     # FFuf
     "run_ffuf_discovery",
     "pull_ffuf_binary_check",

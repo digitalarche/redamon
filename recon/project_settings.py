@@ -337,6 +337,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'JSLUICE_EXTRACT_SECRETS': True,
     'JSLUICE_CONCURRENCY': 5,
     'JSLUICE_PARALLELISM': 5,
+    'JSLUICE_VERIFY_URLS': True,
+    'JSLUICE_VERIFY_DOCKER_IMAGE': 'projectdiscovery/httpx:latest',
+    'JSLUICE_VERIFY_TIMEOUT': 5,
+    'JSLUICE_VERIFY_RATE_LIMIT': 50,
+    'JSLUICE_VERIFY_THREADS': 50,
+    'JSLUICE_VERIFY_ACCEPT_STATUS': [200, 201, 301, 302, 307, 308, 401, 403],
+    'JSLUICE_EXCLUDE_PATTERNS': [
+        '/_next/image', '/_next/static', '/_next/data', '/__nextjs',
+        '/_nuxt/', '/__nuxt',
+        '/runtime.', '/polyfills.', '/vendor.',
+        '/webpack', '/chunk.', '.chunk.js', '.bundle.js', 'hot-update',
+        '/static/', '/public/', '/dist/', '/build/', '/lib/', '/vendor/', '/node_modules/',
+        '.js', '.mjs', '.map', '.css', '.scss', '.sass', '.less',
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.avif',
+        '.woff', '.woff2', '.ttf', '.eot', '.otf',
+        '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.zip', '.rar', '.7z', '.tar', '.gz',
+        '/rxjs/', '/react/', '/angular/', '/lodash/', '/zone.js/',
+    ],
 
     # ========== JS RECON SCANNER ==========
     'JS_RECON_ENABLED': False,
@@ -882,6 +902,13 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['JSLUICE_EXTRACT_SECRETS'] = project.get('jsluiceExtractSecrets', DEFAULT_SETTINGS['JSLUICE_EXTRACT_SECRETS'])
     settings['JSLUICE_CONCURRENCY'] = project.get('jsluiceConcurrency', DEFAULT_SETTINGS['JSLUICE_CONCURRENCY'])
     settings['JSLUICE_PARALLELISM'] = project.get('jsluiceParallelism', DEFAULT_SETTINGS['JSLUICE_PARALLELISM'])
+    settings['JSLUICE_VERIFY_URLS'] = project.get('jsluiceVerifyUrls', DEFAULT_SETTINGS['JSLUICE_VERIFY_URLS'])
+    settings['JSLUICE_VERIFY_DOCKER_IMAGE'] = project.get('jsluiceVerifyDockerImage', DEFAULT_SETTINGS['JSLUICE_VERIFY_DOCKER_IMAGE'])
+    settings['JSLUICE_VERIFY_TIMEOUT'] = project.get('jsluiceVerifyTimeout', DEFAULT_SETTINGS['JSLUICE_VERIFY_TIMEOUT'])
+    settings['JSLUICE_VERIFY_RATE_LIMIT'] = project.get('jsluiceVerifyRateLimit', DEFAULT_SETTINGS['JSLUICE_VERIFY_RATE_LIMIT'])
+    settings['JSLUICE_VERIFY_THREADS'] = project.get('jsluiceVerifyThreads', DEFAULT_SETTINGS['JSLUICE_VERIFY_THREADS'])
+    settings['JSLUICE_VERIFY_ACCEPT_STATUS'] = project.get('jsluiceVerifyAcceptStatus', DEFAULT_SETTINGS['JSLUICE_VERIFY_ACCEPT_STATUS'])
+    settings['JSLUICE_EXCLUDE_PATTERNS'] = project.get('jsluiceExcludePatterns', DEFAULT_SETTINGS['JSLUICE_EXCLUDE_PATTERNS'])
 
     # JS Recon Scanner
     settings['JS_RECON_ENABLED'] = project.get('jsReconEnabled', DEFAULT_SETTINGS['JS_RECON_ENABLED'])

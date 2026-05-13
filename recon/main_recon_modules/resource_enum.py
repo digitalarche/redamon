@@ -68,8 +68,10 @@ from recon.helpers.resource_enum import (
     pull_hakrawler_docker_image,
     merge_hakrawler_into_by_base_url,
     # jsluice helpers
+    DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
     run_jsluice_analysis,
     merge_jsluice_into_by_base_url,
+    verify_jsluice_urls,
     # FFuf helpers
     run_ffuf_discovery,
     pull_ffuf_binary_check,
@@ -165,6 +167,9 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             ("JSLUICE_ENABLED", "jsluice"),
             ("JSLUICE_MAX_FILES", "jsluice"),
             ("JSLUICE_PARALLELISM", "jsluice"),
+            ("JSLUICE_VERIFY_URLS", "jsluice"),
+            ("JSLUICE_VERIFY_RATE_LIMIT", "jsluice"),
+            ("JSLUICE_VERIFY_THREADS", "jsluice"),
             ("ARJUN_ENABLED", "Arjun"),
             ("ARJUN_THREADS", "Arjun"),
             ("ARJUN_RATE_LIMIT", "Arjun"),
@@ -216,6 +221,19 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
     JSLUICE_EXTRACT_SECRETS = settings.get('JSLUICE_EXTRACT_SECRETS', True)
     JSLUICE_CONCURRENCY = settings.get('JSLUICE_CONCURRENCY', 5)
     JSLUICE_PARALLELISM = settings.get('JSLUICE_PARALLELISM', 3)
+    JSLUICE_VERIFY_URLS = settings.get('JSLUICE_VERIFY_URLS', True)
+    JSLUICE_VERIFY_DOCKER_IMAGE = settings.get('JSLUICE_VERIFY_DOCKER_IMAGE', 'projectdiscovery/httpx:latest')
+    JSLUICE_VERIFY_TIMEOUT = settings.get('JSLUICE_VERIFY_TIMEOUT', 5)
+    JSLUICE_VERIFY_RATE_LIMIT = settings.get('JSLUICE_VERIFY_RATE_LIMIT', 50)
+    JSLUICE_VERIFY_THREADS = settings.get('JSLUICE_VERIFY_THREADS', 50)
+    JSLUICE_VERIFY_ACCEPT_STATUS = settings.get(
+        'JSLUICE_VERIFY_ACCEPT_STATUS',
+        [200, 201, 301, 302, 307, 308, 401, 403]
+    )
+    JSLUICE_EXCLUDE_PATTERNS = list(settings.get(
+        'JSLUICE_EXCLUDE_PATTERNS',
+        DEFAULT_JSLUICE_EXCLUDE_PATTERNS,
+    ))
 
     # FFuf settings
     FFUF_ENABLED = settings.get('FFUF_ENABLED', False)
@@ -415,6 +433,12 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         print(f"[*][jsluice] Extract URLs: {JSLUICE_EXTRACT_URLS}")
         print(f"[*][jsluice] Extract secrets: {JSLUICE_EXTRACT_SECRETS}")
         print(f"[*][jsluice] Parallelism: {JSLUICE_PARALLELISM} concurrent base URLs")
+        print(f"[*][jsluice] URL verification: {JSLUICE_VERIFY_URLS}")
+        if JSLUICE_VERIFY_URLS:
+            print(f"[*][jsluice] Verify rate limit: {JSLUICE_VERIFY_RATE_LIMIT} req/s")
+            print(f"[*][jsluice] Verify threads: {JSLUICE_VERIFY_THREADS}")
+            print(f"[*][jsluice] Verify timeout: {JSLUICE_VERIFY_TIMEOUT}s")
+        print(f"[*][jsluice] Noise filter patterns: {len(JSLUICE_EXCLUDE_PATTERNS)}")
     # FFuf settings
     print(f"[*][FFuf] Enabled: {FFUF_ENABLED}")
     if FFUF_ENABLED:
@@ -693,11 +717,17 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
         "jsluice_parsed": 0,
         "jsluice_new": 0,
         "jsluice_overlap": 0,
+        "jsluice_verify_total": 0,
+        "jsluice_verify_candidates": 0,
+        "jsluice_skipped_blacklist": 0,
+        "jsluice_verified": 0,
+        "jsluice_skipped_unverified": 0,
     }
 
     if JSLUICE_ENABLED and (JSLUICE_EXTRACT_URLS or JSLUICE_EXTRACT_SECRETS):
         all_crawl_urls = list(set(katana_urls + hakrawler_urls))
         if all_crawl_urls:
+            verify_stats = {}
             jsluice_result = run_jsluice_analysis(
                 all_crawl_urls,
                 JSLUICE_MAX_FILES,
@@ -711,14 +741,40 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             )
 
             if jsluice_result.get("urls"):
+                if JSLUICE_VERIFY_URLS:
+                    verified_jsluice_urls, verify_stats = verify_jsluice_urls(
+                        jsluice_result["urls"],
+                        JSLUICE_VERIFY_DOCKER_IMAGE,
+                        JSLUICE_VERIFY_THREADS,
+                        JSLUICE_VERIFY_TIMEOUT,
+                        JSLUICE_VERIFY_RATE_LIMIT,
+                        JSLUICE_VERIFY_ACCEPT_STATUS,
+                        JSLUICE_EXCLUDE_PATTERNS,
+                        use_proxy,
+                    )
+                    jsluice_result["urls"] = sorted(verified_jsluice_urls)
+                    jsluice_stats.update(verify_stats)
+                else:
+                    jsluice_stats["jsluice_verify_total"] = len(jsluice_result["urls"])
+                    jsluice_stats["jsluice_verify_candidates"] = len(jsluice_result["urls"])
+                    jsluice_stats["jsluice_verified"] = len(jsluice_result["urls"])
+
+            if jsluice_result.get("urls"):
                 print("\n[*][jsluice] Merging extracted URLs into results...")
-                organized_data['by_base_url'], jsluice_stats = merge_jsluice_into_by_base_url(
+                organized_data['by_base_url'], merge_stats = merge_jsluice_into_by_base_url(
                     jsluice_result["urls"],
                     organized_data['by_base_url'],
                 )
+                jsluice_stats.update(merge_stats)
+                jsluice_stats.update(verify_stats)
                 print(f"[+][jsluice] Total URLs: {jsluice_stats['jsluice_total']}")
                 print(f"[+][jsluice] New endpoints: {jsluice_stats['jsluice_new']}")
                 print(f"[+][jsluice] Overlap: {jsluice_stats['jsluice_overlap']}")
+                if JSLUICE_VERIFY_URLS:
+                    print(f"[+][jsluice] Skipped (blacklist): {jsluice_stats['jsluice_skipped_blacklist']}")
+                    print(f"[+][jsluice] Skipped (unverified): {jsluice_stats['jsluice_skipped_unverified']}")
+            elif JSLUICE_VERIFY_URLS and jsluice_stats.get("jsluice_verify_total", 0) > 0:
+                print(f"[-][jsluice] No URLs survived validation ({jsluice_stats['jsluice_skipped_blacklist']} blacklisted, {jsluice_stats['jsluice_skipped_unverified']} unverified)")
 
     # FFuf directory fuzzing (runs after crawlers and jsluice, before GAU merge)
     ffuf_stats = {
@@ -1069,6 +1125,7 @@ def run_resource_enum(recon_data: dict, output_file: Optional[Path] = None, sett
             # jsluice metadata
             'jsluice_enabled': JSLUICE_ENABLED,
             'jsluice_max_files': JSLUICE_MAX_FILES if JSLUICE_ENABLED else None,
+            'jsluice_verify_enabled': JSLUICE_VERIFY_URLS if JSLUICE_ENABLED else False,
             'jsluice_urls_found': len(jsluice_in_scope_urls),
             'jsluice_secrets_found': len(jsluice_result.get("secrets", [])),
             'jsluice_stats': jsluice_stats,
