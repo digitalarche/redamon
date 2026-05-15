@@ -78,25 +78,6 @@ def _validate_mutex_groups(plan_members: list) -> Optional[str]:
     return None
 
 
-def _snapshot_parent_trace(parent_state: AgentState) -> list[dict]:
-    """Capture the parent's execution_trace plus any `_completed_step` not
-    yet merged in. Defensive against the iteration-edge case where think_node
-    decides deploy_fireteam in the same call that finalizes the prior tool's
-    output: depending on langgraph's update merge order, the freshly-analyzed
-    step may live in `_completed_step` while the trace itself still reflects
-    the pre-iteration state."""
-    trace = list(parent_state.get("execution_trace") or [])
-    completed = parent_state.get("_completed_step")
-    if completed:
-        completed_id = completed.get("step_id")
-        already_in_trace = any(
-            (s or {}).get("step_id") == completed_id for s in trace
-        ) if completed_id else False
-        if not already_in_trace:
-            trace = trace + [completed]
-    return trace
-
-
 def _build_member_state(
     parent_state: AgentState,
     spec: dict,
@@ -130,7 +111,7 @@ def _build_member_state(
         len(((parent_state.get("_current_fireteam_plan") or {}).get("members") or [])) - 1,
     )
     logger.info(
-        "[%s] member=%s SNAPSHOT parent counts: findings=%d failures=%d decisions=%d trace=%d target_keys=%d peers=%d _completed_step=%s",
+        "[%s] member=%s SNAPSHOT parent counts: findings=%d failures=%d decisions=%d trace=%d target_keys=%d peers=%d",
         parent_state.get("session_id", "?"),
         member_id,
         len(parent_state.get("chain_findings_memory") or []),
@@ -139,7 +120,6 @@ def _build_member_state(
         len(parent_state.get("execution_trace") or []),
         len(parent_state.get("target_info") or {}),
         _peer_count,
-        bool(parent_state.get("_completed_step")),
     )
 
     base: dict = {
@@ -174,18 +154,10 @@ def _build_member_state(
         # attribution), failed attempts, decisions, and recent tool outputs
         # instead of a 200-char-per-step trace that omits the artifacts they
         # need (captured JWTs, cleared endpoints, registered users, etc.).
-        #
-        # Edge case: when the parent decides to deploy_fireteam in the same
-        # think_node iteration that processes the prior tool's output, the
-        # latest step may live in `_completed_step` while `execution_trace`
-        # still reflects the pre-iteration state (depending on how langgraph
-        # serialized the updates between nodes). Belt-and-suspenders: merge
-        # `_completed_step` into the snapshot if it's not already in the
-        # trace. Dedup by step_id.
         "_parent_chain_findings": list(parent_state.get("chain_findings_memory") or []),
         "_parent_chain_failures": list(parent_state.get("chain_failures_memory") or []),
         "_parent_chain_decisions": list(parent_state.get("chain_decisions_memory") or []),
-        "_parent_execution_trace": _snapshot_parent_trace(parent_state),
+        "_parent_execution_trace": list(parent_state.get("execution_trace") or []),
 
         # Sibling member specs for this wave (everyone in the plan except this
         # member). Rendered into the system prompt as an "out of scope" block
