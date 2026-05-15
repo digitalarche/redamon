@@ -714,6 +714,11 @@ class AgentState(TypedDict):
     chain_findings_memory: List[dict]    # Accumulated findings for this session
     chain_failures_memory: List[dict]    # Accumulated failures for this session
     chain_decisions_memory: List[dict]   # Accumulated decisions for this session
+    # Wave-completion history (one entry per completed fireteam wave). Written
+    # unconditionally by fireteam_collect_node — including for zero-finding
+    # waves — so the planner can see "wave X already covered scope Y" even
+    # when the wave produced no findings to attribute via source_agent tags.
+    chain_waves_memory: List[dict]
 
     # Internal: previous step ID for NEXT_STEP linking in chain graph
     _last_chain_step_id: Optional[str]
@@ -883,6 +888,7 @@ def create_initial_state(
         "chain_findings_memory": [],
         "chain_failures_memory": [],
         "chain_decisions_memory": [],
+        "chain_waves_memory": [],
         "_last_chain_step_id": None,
         "_prior_chain_context": None,
         "_response_tier": None,
@@ -1199,6 +1205,7 @@ def format_chain_context(
     chain_decisions: List[dict],
     execution_trace: List[dict],
     recent_iterations: int = 20,
+    chain_waves: Optional[List[dict]] = None,
 ) -> str:
     """Format attack chain memory for the LLM system prompt.
 
@@ -1206,8 +1213,19 @@ def format_chain_context(
     Shows the last *recent_iterations* steps with wave tools collapsed
     into a compact summary.  Findings/failures/decisions are listed up
     front for instant signal.
+
+    ``chain_waves`` lists completed fireteam waves (one entry per wave,
+    including zero-finding waves). Rendered in its own section so the planner
+    can detect "this wave already covered scope X" even when no findings were
+    attributed via source_agent.
     """
-    if not execution_trace and not chain_findings and not chain_failures:
+    chain_waves = chain_waves or []
+    if (
+        not execution_trace
+        and not chain_findings
+        and not chain_failures
+        and not chain_waves
+    ):
         return "No steps executed yet."
 
     lines: list[str] = []
@@ -1270,6 +1288,47 @@ def format_chain_context(
             approved = "approved" if d.get("approved") else "rejected"
             by = d.get("made_by") or "user"
             lines.append(f"  [step {step}] {dtype}: {from_s} → {to_s} ({by} {approved})")
+        lines.append("")
+
+    # ── Fireteam Waves ──────────────────────────────────
+    # One entry per completed fireteam wave, including zero-finding waves.
+    # The planner consults this to recognize "wave X already covered scope Y"
+    # even when no findings were attributed via source_agent tags. Without
+    # this section, a zero-finding wave leaves the planner with the same
+    # context a brand-new session sees, and the "DO NOT redeploy the same
+    # plan" directive in the system prompt has no checkable referent.
+    if chain_waves:
+        lines.append("── Fireteam Waves ────────────────────────────────")
+        for w in chain_waves:
+            wave_id = w.get("wave_id") or "?"
+            it = w.get("completed_at_iteration", "?")
+            n_members = w.get("n_members", 0)
+            n_success = w.get("n_success", 0)
+            n_timeout = w.get("n_timeout", 0)
+            n_error = w.get("n_error", 0)
+            total_findings = w.get("total_findings", 0)
+            status_parts = [f"{n_success}/{n_members} succeeded"]
+            if n_timeout:
+                status_parts.append(f"{n_timeout} timed out")
+            if n_error:
+                status_parts.append(f"{n_error} errored")
+            status_parts.append(f"{total_findings} findings")
+            lines.append(
+                f"  Wave {wave_id} [iter {it}] {', '.join(status_parts)}"
+            )
+            for m in (w.get("members") or []):
+                name = m.get("name") or "(unnamed)"
+                task = (m.get("task_summary") or "").strip()
+                status = m.get("status") or "unknown"
+                iters = m.get("iterations_used", 0)
+                f_count = m.get("findings_count", 0)
+                reason = (m.get("completion_reason") or "").strip()
+                task_str = f" — {task}" if task else ""
+                reason_str = f" — {reason}" if reason else ""
+                lines.append(
+                    f"    - {name}{task_str}: {status}, {iters} iter, "
+                    f"{f_count} findings{reason_str}"
+                )
         lines.append("")
 
     # ── Recent Steps (grouped by iteration) ─────────────

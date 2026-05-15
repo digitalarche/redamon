@@ -99,6 +99,7 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         chain_failures=state.get("chain_failures_memory", []),
         chain_decisions=state.get("chain_decisions_memory", []),
         execution_trace=state.get("execution_trace", []),
+        chain_waves=state.get("chain_waves_memory", []),
     )
     todo_list_formatted = format_todo_list(state.get("todo_list", []))
     target_info_formatted = json_dumps_safe(state.get("target_info", {}), indent=2)
