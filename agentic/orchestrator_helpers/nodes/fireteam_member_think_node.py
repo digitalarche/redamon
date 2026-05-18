@@ -1012,6 +1012,15 @@ async def fireteam_member_think_node(
         input_tokens_this_turn += int(_usage.get("input_tokens", 0) or 0)
         output_tokens_this_turn += int(_usage.get("output_tokens", 0) or 0)
 
+        logger.info(f"\n{'='*60}")
+        logger.info(
+            f"MEMBER LLM RAW RESPONSE - [{session_id}] member {member_id} "
+            f"iter {current_iter} (attempt {attempt+1}/{max_retries})"
+        )
+        logger.info(f"{'='*60}")
+        logger.info(f"{raw_content}")
+        logger.info(f"{'='*60}\n")
+
         decision, parse_error = try_parse_llm_decision(raw_content)
         if decision is None:
             # JSON / Pydantic shape error: loop and retry.
