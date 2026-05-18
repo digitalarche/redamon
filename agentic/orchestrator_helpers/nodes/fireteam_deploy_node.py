@@ -361,6 +361,38 @@ def _timeout_result(spec: dict, member_id: str, wall_s: float) -> dict:
     ).model_dump()
 
 
+def _timeout_result_from_snapshot(
+    snapshot: Optional[dict],
+    spec: dict,
+    member_id: str,
+    wall_s: float,
+) -> dict:
+    """Build a timeout-labeled result from an in-flight member snapshot.
+
+    The wave-timeout handler cancels in-flight tasks, which destroys the
+    closure-local ``final_state`` inside ``_run_one``. To preserve real
+    iteration/token/findings counts for productive work done before the
+    cancellation, ``_run_one`` registers a reference to its ``final_state``
+    in the outer-scope ``member_snapshots`` dict at startup; the in-place
+    ``.update(node_update)`` calls during the astream loop keep that
+    reference current. Here we reuse ``_result_from_final_state`` to extract
+    those counts and then override status/completion_reason to mark the
+    member as timed out.
+
+    Falls back to the all-zeros ``_timeout_result`` when no snapshot exists
+    (member cancelled before any state update).
+    """
+    if not snapshot:
+        return _timeout_result(spec, member_id, wall_s)
+    result = _result_from_final_state(snapshot, spec, member_id, wall_s)
+    result["status"] = "timeout"
+    result["completion_reason"] = "wave_timeout"
+    # Suppress any pending operator-approval signal: the member is
+    # terminating, not awaiting confirmation.
+    result["pending_confirmation"] = None
+    return result
+
+
 def _error_result(spec: dict, member_id: str, exc: BaseException, wall_s: float) -> dict:
     return FireteamMemberResult(
         member_id=member_id,
@@ -560,6 +592,14 @@ async def fireteam_deploy_node(
     from orchestrator_helpers.member_streaming import scoped_member_streaming
     from orchestrator_helpers.streaming import emit_streaming_events
 
+    # Snapshot map: each _run_one registers a reference to its closure-local
+    # ``final_state`` here, keyed by member_id. The in-place mutations inside
+    # the astream loop (`final_state.update(node_update)`) keep these
+    # references current. On wave timeout, the outer handler reads from this
+    # map via _timeout_result_from_snapshot to preserve real iteration/
+    # token/findings counts for productive work done before cancellation.
+    member_snapshots: dict = {}
+
     async def _run_one(spec: dict, member_id: str) -> dict:
         async with sem:
             member_state = _build_member_state(state, spec, member_id, fireteam_id_key)
@@ -581,6 +621,10 @@ async def fireteam_deploy_node(
                 except Exception:
                     pass
             final_state = dict(member_state)
+            # Register the snapshot reference. The outer wave-timeout handler
+            # reads this to recover real iter/token/findings counts even when
+            # the member's task is cancelled mid-loop.
+            member_snapshots[member_id] = final_state
             try:
                 # Activate the member-scoped streaming proxy. While this
                 # context is active, resolve_streaming_callback returns the
@@ -620,10 +664,12 @@ async def fireteam_deploy_node(
                 )
             except asyncio.CancelledError:
                 logger.info("[%s] wave=%s member=%s CANCELLED", session_id, fireteam_id_key, member_id)
-                # Propagate cancellation to gather. Per-member DB persistence on
-                # wave-timeout happens in the outer TimeoutError handler below,
-                # which has access to the full results list (including real
-                # iteration/token counts) and can label status correctly.
+                # Propagate cancellation to gather. The outer TimeoutError
+                # handler builds the per-member result via
+                # _timeout_result_from_snapshot, which reads this member's
+                # last in-flight final_state from member_snapshots (kept in
+                # sync via in-place .update() calls in the astream loop
+                # above). That preserves real iter/token/findings counts.
                 raise
             except Exception as exc:
                 logger.exception("[%s] wave=%s member=%s CRASHED", session_id, fireteam_id_key, member_id)
@@ -696,9 +742,15 @@ async def fireteam_deploy_node(
                     results.append(t.result() if isinstance(t.result(), dict)
                                    else _error_result(m, mid, t.result(), time.monotonic() - wave_start))
                 else:
-                    results.append(_timeout_result(m, mid, time.monotonic() - wave_start))
+                    results.append(_timeout_result_from_snapshot(
+                        member_snapshots.get(mid), m, mid,
+                        time.monotonic() - wave_start,
+                    ))
             except asyncio.CancelledError:
-                results.append(_timeout_result(m, mid, time.monotonic() - wave_start))
+                results.append(_timeout_result_from_snapshot(
+                    member_snapshots.get(mid), m, mid,
+                    time.monotonic() - wave_start,
+                ))
             except Exception as e:
                 results.append(_error_result(m, mid, e, time.monotonic() - wave_start))
         # Persist per-member timeout to Postgres. Without this, members whose
