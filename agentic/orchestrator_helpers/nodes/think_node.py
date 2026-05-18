@@ -558,6 +558,21 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         input_tokens_this_turn += int(usage.get("input_tokens", 0) or 0)
         output_tokens_this_turn += int(usage.get("output_tokens", 0) or 0)
 
+        # Prompt-cache observability: log all four token-detail fields so the
+        # operator can confirm caching is firing. Anthropic populates the
+        # ephemeral_5m_input_tokens / ephemeral_1h_input_tokens fields on
+        # cache WRITE (cache_creation stays 0 in newer SDK versions) and
+        # the cache_read field on cache HIT. OpenAI / DeepSeek populate
+        # cache_read only. Zero on every field means no cache activity.
+        _ctok = (usage.get("input_token_details") or {})
+        logger.info(
+            f"LLM CACHE: read={_ctok.get('cache_read', 0)} "
+            f"creation={_ctok.get('cache_creation', 0)} "
+            f"eph_5m={_ctok.get('ephemeral_5m_input_tokens', 0)} "
+            f"eph_1h={_ctok.get('ephemeral_1h_input_tokens', 0)} "
+            f"provider={type(llm).__name__} (iter {iteration})"
+        )
+
         logger.info(f"\n{'='*60}")
         logger.info(f"LLM RAW RESPONSE - Iteration {iteration} (attempt {attempt+1}/{max_retries})")
         logger.info(f"{'='*60}")
