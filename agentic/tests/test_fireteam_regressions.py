@@ -994,5 +994,306 @@ class WaveClockExcludesConfirmationWaitRegression(unittest.IsolatedAsyncioTestCa
         drop_wave_credit(session_id, wave_id)
 
 
+# =============================================================================
+# Deep-review hardening for the wave-clock credit registry.
+# =============================================================================
+#
+# Additional edge-case coverage beyond the two main tests above. These pin
+# correctness properties identified in deep review: cancellation safety,
+# robustness to spurious calls, per-wave isolation, in-progress accounting,
+# non-overlapping accumulation, and the "no confirmation" backwards-compat
+# path on the deadline-extension loop.
+
+
+class WaveCreditRegistryHardening(unittest.IsolatedAsyncioTestCase):
+    """Unit tests on fireteam_confirmation_registry. No deploy node, no I/O."""
+
+    def setUp(self):
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            drop_wave_credit,
+        )
+        # Use distinct ids per test to avoid cross-test bleed in the
+        # module-level dicts. setUp clears any prior state at this key.
+        self.session_id = f"hardening-{id(self)}"
+        self.wave_id = "wave-A"
+        drop_wave_credit(self.session_id, self.wave_id)
+        drop_wave_credit(self.session_id, "wave-B")
+
+    async def test_cancellation_during_wait_balances_count(self):
+        """A member cancelled mid-wait must not leave the wave clock
+        stuck-paused. Simulates fireteam_member_think_node's try/finally."""
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            begin_confirmation_wait, end_confirmation_wait,
+            get_credit_s, _WAVE_ACTIVE_WAITS, _WAVE_PAUSE_START,
+        )
+
+        async def member_like():
+            begin_confirmation_wait(self.session_id, self.wave_id)
+            try:
+                await asyncio.sleep(10.0)  # would block forever on its own
+            finally:
+                end_confirmation_wait(self.session_id, self.wave_id)
+
+        task = asyncio.create_task(member_like())
+        await asyncio.sleep(0.15)  # let the wait register
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+        # Post-cancel state: count balanced, no in-progress pause, credit
+        # captured ~= 0.15s (the wall-clock the wait was active).
+        self.assertNotIn(
+            (self.session_id, self.wave_id), _WAVE_ACTIVE_WAITS,
+            "active-waits dict still has an entry after cancellation; "
+            "count is unbalanced and the wave clock will stay paused",
+        )
+        self.assertNotIn(
+            (self.session_id, self.wave_id), _WAVE_PAUSE_START,
+            "pause-start dict still has an entry; in-progress flag leaked",
+        )
+        credit = get_credit_s(self.session_id, self.wave_id)
+        self.assertGreater(credit, 0.1,
+                           f"expected ~0.15s captured, got {credit:.3f}")
+        self.assertLess(credit, 0.4,
+                        f"expected ~0.15s captured, got {credit:.3f}")
+
+    def test_spurious_end_without_begin_is_safe(self):
+        """end_confirmation_wait called without a preceding begin must not
+        crash, must not commit false credit, and must leave the count clean."""
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            begin_confirmation_wait, end_confirmation_wait,
+            get_credit_s, _WAVE_ACTIVE_WAITS,
+        )
+
+        # No prior begin. Should be a no-op.
+        end_confirmation_wait(self.session_id, self.wave_id)
+        self.assertEqual(get_credit_s(self.session_id, self.wave_id), 0.0)
+        self.assertNotIn((self.session_id, self.wave_id), _WAVE_ACTIVE_WAITS)
+
+        # And a fresh begin/end after the spurious end still works.
+        begin_confirmation_wait(self.session_id, self.wave_id)
+        _time.sleep(0.1)
+        end_confirmation_wait(self.session_id, self.wave_id)
+        credit = get_credit_s(self.session_id, self.wave_id)
+        self.assertGreater(credit, 0.05,
+                           f"begin/end after spurious end did not record credit: {credit}")
+
+    def test_drop_wave_credit_isolation_between_waves(self):
+        """drop_wave_credit on wave-A must not affect wave-B in the same
+        session. Pins the (session_id, wave_id) keying."""
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            begin_confirmation_wait, end_confirmation_wait,
+            get_credit_s, drop_wave_credit,
+        )
+
+        # Accumulate credit on both waves.
+        begin_confirmation_wait(self.session_id, "wave-A")
+        _time.sleep(0.1)
+        end_confirmation_wait(self.session_id, "wave-A")
+
+        begin_confirmation_wait(self.session_id, "wave-B")
+        _time.sleep(0.1)
+        end_confirmation_wait(self.session_id, "wave-B")
+
+        credit_a = get_credit_s(self.session_id, "wave-A")
+        credit_b = get_credit_s(self.session_id, "wave-B")
+        self.assertGreater(credit_a, 0.05)
+        self.assertGreater(credit_b, 0.05)
+
+        drop_wave_credit(self.session_id, "wave-A")
+        self.assertEqual(
+            get_credit_s(self.session_id, "wave-A"), 0.0,
+            "drop on wave-A did not clear its credit",
+        )
+        self.assertAlmostEqual(
+            get_credit_s(self.session_id, "wave-B"), credit_b, places=2,
+            msg="drop on wave-A clobbered wave-B credit (keying bug)",
+        )
+
+    def test_get_credit_s_includes_in_progress_pause(self):
+        """During an active wait, get_credit_s must reflect the in-progress
+        elapsed time, not just committed totals. The deadline-extension
+        loop relies on this to extend deadline mid-wait."""
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            begin_confirmation_wait, end_confirmation_wait, get_credit_s,
+        )
+
+        begin_confirmation_wait(self.session_id, self.wave_id)
+        _time.sleep(0.1)
+        # Read mid-wait. Should reflect ~0.1s even though end has not fired.
+        mid = get_credit_s(self.session_id, self.wave_id)
+        self.assertGreater(mid, 0.05,
+                           f"in-progress credit not reported: {mid:.3f}")
+        _time.sleep(0.1)
+        mid2 = get_credit_s(self.session_id, self.wave_id)
+        self.assertGreater(mid2, mid,
+                           f"in-progress credit not monotonic: {mid:.3f} -> {mid2:.3f}")
+        end_confirmation_wait(self.session_id, self.wave_id)
+        final = get_credit_s(self.session_id, self.wave_id)
+        # After end, credit is stable (no more in-progress component).
+        _time.sleep(0.05)
+        self.assertEqual(
+            get_credit_s(self.session_id, self.wave_id), final,
+            "credit grew after end_confirmation_wait (in-progress flag leaked)",
+        )
+
+    def test_sequential_non_overlapping_waits_accumulate(self):
+        """Two sequential (non-overlapping) waits should credit the sum of
+        their durations, not just one or the other."""
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            begin_confirmation_wait, end_confirmation_wait, get_credit_s,
+        )
+
+        begin_confirmation_wait(self.session_id, self.wave_id)
+        _time.sleep(0.15)
+        end_confirmation_wait(self.session_id, self.wave_id)
+        first = get_credit_s(self.session_id, self.wave_id)
+
+        _time.sleep(0.1)  # gap (no wait active, no credit accruing)
+
+        begin_confirmation_wait(self.session_id, self.wave_id)
+        _time.sleep(0.15)
+        end_confirmation_wait(self.session_id, self.wave_id)
+        total = get_credit_s(self.session_id, self.wave_id)
+
+        # Gap must not be credited; total should be approximately first + 0.15.
+        self.assertAlmostEqual(total - first, 0.15, delta=0.08,
+                               msg=f"second wait credit off: total={total:.3f} first={first:.3f}")
+        # And the gap (0.1s) is NOT credited.
+        self.assertLess(total, first + 0.25,
+                        f"gap may have been credited: total={total:.3f} first={first:.3f}")
+
+
+def _fast_complete_graph_factory():
+    """Member graph that completes in ~0.1s without registering any
+    confirmation wait. Used to verify the deadline-extension loop's
+    no-confirmation path still behaves like the old gather() did."""
+
+    class _FastGraph:
+        async def _run(self, s, config=None):
+            await asyncio.sleep(0.1)
+            yield {
+                "fireteam_complete": {
+                    "task_complete": True, "completion_reason": "complete",
+                    "current_iteration": 1, "tokens_used": 3,
+                    "input_tokens_used": 2, "output_tokens_used": 1,
+                    "execution_trace": [], "target_info": {},
+                    "chain_findings_memory": [],
+                }
+            }
+
+        def astream(self, s, config=None):
+            return self._run(s, config)
+    return _FastGraph()
+
+
+class WaveClockBackwardsCompatRegression(unittest.IsolatedAsyncioTestCase):
+    """Pins that the deadline-extension loop preserves prior semantics for
+    waves with no operator-confirmation activity:
+      * Normal completion still flips status to "success" and writes a
+        terminal _patch_member.
+      * Wave timeout still fires at FIRETEAM_TIMEOUT_SEC when no member
+        registers a confirmation wait (no spurious deadline extension)."""
+
+    async def test_no_confirmation_wave_completes_normally(self):
+        """No member registers begin/end_confirmation_wait. The wave must
+        complete via the deadline loop's tasks-drained path, not via the
+        timeout branch, and the registry must have no leftover credit."""
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+        from orchestrator_helpers.fireteam_confirmation_registry import (
+            get_credit_s, _WAVE_CREDIT_S, _WAVE_ACTIVE_WAITS, _WAVE_PAUSE_START,
+        )
+
+        patch_member_mock = AsyncMock()
+        # FIRETEAM_TIMEOUT_SEC=5 is comfortably longer than the 0.1s member
+        # graph, so a timeout-branch trigger would indicate a real bug.
+        settings = lambda k, d=None: {
+            "FIRETEAM_MAX_CONCURRENT": 3,
+            "FIRETEAM_MAX_MEMBERS": 8,
+            "FIRETEAM_TIMEOUT_SEC": 5,
+            "FIRETEAM_MEMBER_MAX_ITERATIONS": 10,
+        }.get(k, d)
+
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=patch_member_mock,
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=settings,
+        ):
+            await fireteam_deploy_node(
+                _parent_state(n_members=2), None,
+                member_graph=_fast_complete_graph_factory(),
+                streaming_callbacks={},
+                neo4j_creds=None,
+            )
+
+        # Both members terminal-status success.
+        self.assertGreaterEqual(len(patch_member_mock.call_args_list), 2)
+        statuses = [c.args[3]["status"] for c in patch_member_mock.call_args_list]
+        self.assertTrue(
+            all(s == "success" for s in statuses),
+            f"expected all success on no-confirmation wave; got {statuses}",
+        )
+
+        # Registry must be clean afterwards (no leaked credit state).
+        leaked = [k for k in _WAVE_CREDIT_S if k[0] == "s-timeout"]
+        leaked += [k for k in _WAVE_ACTIVE_WAITS if k[0] == "s-timeout"]
+        leaked += [k for k in _WAVE_PAUSE_START if k[0] == "s-timeout"]
+        self.assertEqual(
+            leaked, [],
+            f"wave-credit state leaked after normal completion: {leaked}",
+        )
+
+    async def test_timeout_still_fires_without_confirmation_credit(self):
+        """A pure-tool-work wave that exceeds FIRETEAM_TIMEOUT_SEC must
+        still hit the timeout branch. The deadline-extension loop must not
+        accidentally extend the deadline when no credit accrues."""
+        from orchestrator_helpers.nodes.fireteam_deploy_node import fireteam_deploy_node
+
+        patch_member_mock = AsyncMock()
+        with patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._persist_deploy",
+            new=AsyncMock(return_value="id"),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_member",
+            new=patch_member_mock,
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node._patch_fireteam",
+            new=AsyncMock(),
+        ), patch(
+            "orchestrator_helpers.nodes.fireteam_deploy_node.get_setting",
+            side_effect=_settings_for_timeout_test(),  # FIRETEAM_TIMEOUT_SEC=1
+        ):
+            t0 = _time.monotonic()
+            await fireteam_deploy_node(
+                _parent_state(n_members=1), None,
+                member_graph=_slow_graph_factory(delay_s=5.0),  # > 1s timeout
+                streaming_callbacks={},
+                neo4j_creds=None,
+            )
+            wall = _time.monotonic() - t0
+
+        # Must time out promptly (~1s + drain), not extend to 5s.
+        self.assertLess(
+            wall, 3.0,
+            f"wave wall-clock too long ({wall:.2f}s); deadline-extension "
+            f"loop incorrectly extended without credit",
+        )
+        # Member must show status=timeout, not success.
+        self.assertGreater(len(patch_member_mock.call_args_list), 0)
+        last_body = patch_member_mock.call_args_list[-1].args[3]
+        self.assertEqual(
+            last_body["status"], "timeout",
+            f"expected timeout, got {last_body.get('status')!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
