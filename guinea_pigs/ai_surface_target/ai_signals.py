@@ -28,6 +28,15 @@ TITLE_SHOWROOM_PORT = 9101
 # links to every catalogued AI path. Katana crawls, builds Endpoint nodes,
 # and the resource_enum AI classifier tags each one.
 ENDPOINT_AI_CLASSIFIER_PORT = 9103
+# Lap-3 (Phase 6) — js_recon AI SDK showroom. Serves an HTML index whose
+# <script> tags point at fixture JS files. Each file is engineered to trip
+# one or more match_ai_sdk() patterns — SDK imports, hard-coded provider
+# keys, the dangerouslyAllowBrowser opt-in, AI-frontend markers in shipped
+# JS chunks, provider base URLs. The js_recon module downloads each file,
+# runs match_ai_sdk(), and writes JsReconFinding(finding_type='ai-sdk-*')
+# nodes. The Phase 6 mixin then enriches matching Secret nodes with
+# ai_provider/ai_finding_id.
+JS_RECON_AI_SDK_PORT = 9104
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +267,12 @@ def all_ports() -> list[int]:
     """Every TCP port the guinea pig binds. Pass this to naabuCustomPorts."""
     return (
         [d["port"] for d in PORT_LISTENERS]
-        + [HEADER_SHOWROOM_PORT, TITLE_SHOWROOM_PORT, ENDPOINT_AI_CLASSIFIER_PORT]
+        + [
+            HEADER_SHOWROOM_PORT,
+            TITLE_SHOWROOM_PORT,
+            ENDPOINT_AI_CLASSIFIER_PORT,
+            JS_RECON_AI_SDK_PORT,
+        ]
     )
 
 
@@ -382,3 +396,479 @@ def resource_enum_paths() -> list[str]:
         else:
             out.append(entry["path"])
     return out
+
+
+# ---------------------------------------------------------------------------
+# Lap-3 (Phase 6) — js_recon AI SDK fixtures (port 9104)
+# ---------------------------------------------------------------------------
+#
+# Each entry pairs a served JS file with the set of findings match_ai_sdk()
+# is expected to emit. The fixtures are EXHAUSTIVE — every detection branch
+# the catalogue ships has at least one positive fixture, plus negative
+# fixtures (clean jQuery, Stripe-only) to guard against regex over-reach.
+#
+# Tokens used in fixtures:
+#   FAKE_OPENAI_KEY  — looks like a real `sk-proj-…T3BlbkFJ…` key (51 chars
+#                      after the prefix marker) so the OpenAI prefix
+#                      pattern fires. Filled with 'a'*40 + 'T3BlbkFJ' + 'b'*40.
+#                      NOT a real key.
+#   FAKE_ANTHROPIC_KEY — `sk-ant-api03-` + 93 padding chars + `AA`. NOT real.
+#   FAKE_GROQ_KEY    — `gsk_` + 52 alphanumerics. NOT real.
+#   FAKE_REPLICATE_KEY — `r8_` + 37 alphanumerics.
+#   FAKE_GEMINI_KEY  — `AIzaSyA` + 32 chars (Gemini = same format as Maps).
+#
+# The strings are crafted to match the patterns in
+# recon/helpers/ai_signal_catalog.py exactly. If a pattern there changes,
+# the corresponding fixture below may need updating.
+
+_FAKE_OPENAI_KEY = "sk-proj-" + "a" * 40 + "T3BlbkFJ" + "b" * 40
+_FAKE_OPENAI_USER_KEY = "sk-" + "a" * 20 + "T3BlbkFJ" + "b" * 20
+_FAKE_ANTHROPIC_KEY = "sk-ant-api03-" + "x" * 93 + "AA"
+_FAKE_GROQ_KEY = "gsk_" + "A1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2"
+_FAKE_REPLICATE_KEY = "r8_" + "AbcDef1234567890AbcDef1234567890ABCDe"  # 37 chars
+_FAKE_GEMINI_KEY = "AIzaSyA" + "b" * 32
+_FAKE_HF_TOKEN = "hf_" + "AbcDefGhIjKlMnOpQrStUvWxYzAbCdEfGhIj"  # 36 alphabetic
+_FAKE_LANGFUSE_SECRET = "sk-lf-12345678-1234-1234-1234-1234567890ab"
+_FAKE_PINECONE_KEY = "pcsk_" + "abcdef1234567890_abcdef1234567890abcdef1234567890_"
+_FAKE_OPENROUTER_KEY = "sk-or-v1-" + "0" * 64
+_FAKE_PERPLEXITY_KEY = "pplx-" + "a" * 48
+_FAKE_STRIPE_KEY = "sk_live_" + "z" * 99
+_FAKE_AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
+
+
+JS_RECON_AI_SDK_FIXTURES: list[dict] = [
+    # ── Smoking-gun OpenAI ───────────────────────────────────────────────
+    {
+        "filename": "openai-leaked.js",
+        "description": "OpenAI SDK shipped to browser with hardcoded apiKey "
+                       "and dangerouslyAllowBrowser opt-in. The single most "
+                       "damaging real-world JS leak shape.",
+        "content": (
+            'import OpenAI from "openai";\n'
+            'fetch("https://api.openai.com/v1/chat/completions");\n'
+            'const c = new OpenAI({\n'
+            f'  apiKey: "{_FAKE_OPENAI_KEY}",\n'
+            '  dangerouslyAllowBrowser: true,\n'
+            '});\n'
+            'export default c;\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "OpenAI"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "OpenAI SDK constructor"},
+            {"category": "ai-sdk-browser-allowed", "sdk_name": "dangerouslyAllowBrowser"},
+            {"category": "ai-provider-url", "sdk_name": "OpenAI API endpoint"},
+        ],
+    },
+
+    # ── Anthropic via SDK ────────────────────────────────────────────────
+    {
+        "filename": "anthropic-direct.js",
+        "description": "Direct @anthropic-ai/sdk usage with constructor key "
+                       "literal — also exercises the loosened browser-flag "
+                       "regex (!0 terser variant).",
+        "content": (
+            'import Anthropic from "@anthropic-ai/sdk";\n'
+            'fetch("https://api.anthropic.com/v1/messages");\n'
+            f'var a = new Anthropic({{apiKey: "{_FAKE_ANTHROPIC_KEY}", '
+            'dangerouslyAllowBrowser: !0}});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "Anthropic"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "Anthropic SDK constructor"},
+            {"category": "ai-sdk-browser-allowed", "sdk_name": "dangerouslyAllowBrowser"},
+            {"category": "ai-provider-url", "sdk_name": "Anthropic API endpoint"},
+        ],
+    },
+
+    # ── Gemini disambiguation: WITH context (escalate to critical) ──────
+    {
+        "filename": "gemini-with-context.js",
+        "description": "AIzaSy* key paired with @google/generative-ai import. "
+                       "The disambiguation rule must escalate to 'Google "
+                       "Gemini API Key' / critical.",
+        "content": (
+            'import { GoogleGenerativeAI } from "@google/generative-ai";\n'
+            f'const genAI = new GoogleGenerativeAI("{_FAKE_GEMINI_KEY}");\n'
+            'fetch("https://generativelanguage.googleapis.com/v1beta/models/'
+            'gemini-1.5-pro:generateContent");\n'
+        ),
+        "expected_findings": [
+            # Fixture imports @google/generative-ai (the legacy SDK name).
+            # If you also need to test the unified @google/genai detection,
+            # add a separate fixture importing that package.
+            {"category": "ai-sdk-client", "sdk_name": "Google Gemini (legacy SDK)"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "Google Gemini SDK constructor"},
+            {"category": "ai-provider-url", "sdk_name": "Google Gemini API endpoint"},
+        ],
+    },
+
+    # ── Gemini disambiguation: WITHOUT context (downgrade to medium) ────
+    {
+        "filename": "google-maps-key.js",
+        "description": "AIzaSy* key WITHOUT any Gemini SDK or endpoint nearby. "
+                       "The disambiguation rule must downgrade to 'Google API "
+                       "Key (likely Maps/Firebase)' / medium.",
+        "content": (
+            '// Standard Google Maps embed — not Gemini.\n'
+            f'const MAPS_KEY = "{_FAKE_GEMINI_KEY}";\n'
+            'const script = document.createElement("script");\n'
+            'script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}`;\n'
+            'document.head.appendChild(script);\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-key-literal", "sdk_name": "Google API Key (likely Maps/Firebase)"},
+        ],
+    },
+
+    # ── LangChain ecosystem ─────────────────────────────────────────────
+    {
+        "filename": "langchain-stack.js",
+        "description": "Realistic LangChain.js app with multiple sub-packages. "
+                       "Tests that the same SDK can be detected via several "
+                       "different sub-path patterns.",
+        "content": (
+            'import { ChatOpenAI } from "@langchain/openai";\n'
+            'import { ChatAnthropic } from "@langchain/anthropic";\n'
+            'import { StateGraph } from "@langchain/langgraph";\n'
+            'import { Document } from "@langchain/core/documents";\n'
+            'import { OpenAIEmbeddings } from "@langchain/openai";\n'
+            'const llm = new ChatOpenAI({ apiKey: process.env.OPENAI_API_KEY });\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "LangChain Core"},
+            {"category": "ai-sdk-client", "sdk_name": "LangChain OpenAI"},
+            {"category": "ai-sdk-client", "sdk_name": "LangChain Anthropic"},
+            {"category": "ai-sdk-client", "sdk_name": "LangGraph"},
+        ],
+    },
+
+    # ── Vercel AI SDK multi-provider ────────────────────────────────────
+    {
+        "filename": "vercel-ai-multi.js",
+        "description": "Vercel AI SDK with multiple provider sub-imports. The "
+                       "ai/react sub-import is detected, the bare 'ai' is "
+                       "intentionally skipped (too generic).",
+        "content": (
+            'import { useChat } from "ai/react";\n'
+            'import { openai } from "@ai-sdk/openai";\n'
+            'import { anthropic } from "@ai-sdk/anthropic";\n'
+            'import { google } from "@ai-sdk/google";\n'
+            'import { mistral } from "@ai-sdk/mistral";\n'
+            'const messages = useChat({ api: "/api/chat" });\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "Vercel AI SDK"},
+            {"category": "ai-sdk-client", "sdk_name": "Vercel AI SDK — OpenAI provider"},
+            {"category": "ai-sdk-client", "sdk_name": "Vercel AI SDK — provider"},
+        ],
+    },
+
+    # ── Vector DB clients ───────────────────────────────────────────────
+    {
+        "filename": "vector-dbs.js",
+        "description": "Pinecone + Qdrant + Chroma + Weaviate client imports "
+                       "shipped to browser. Pinecone constructor with literal "
+                       "key.",
+        "content": (
+            'import { Pinecone } from "@pinecone-database/pinecone";\n'
+            'import { QdrantClient } from "@qdrant/js-client-rest";\n'
+            'import { ChromaClient } from "chromadb";\n'
+            'import weaviate from "weaviate-client";\n'
+            f'const pc = new Pinecone({{apiKey: "{_FAKE_PINECONE_KEY}"}});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "Pinecone"},
+            {"category": "ai-sdk-client", "sdk_name": "Qdrant"},
+            {"category": "ai-sdk-client", "sdk_name": "Chroma DB"},
+            {"category": "ai-sdk-client", "sdk_name": "Weaviate"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "Pinecone SDK constructor"},
+        ],
+    },
+
+    # ── MCP (Model Context Protocol) ────────────────────────────────────
+    {
+        "filename": "mcp-client.js",
+        "description": "MCP SDK + reference server imports — strongly implies "
+                       "a self-hosted AI playground with browser-side creds.",
+        "content": (
+            'import { Server } from "@modelcontextprotocol/sdk/server";\n'
+            'import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio";\n'
+            'import { filesystem } from "@modelcontextprotocol/server-filesystem";\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "MCP SDK"},
+            {"category": "ai-sdk-client", "sdk_name": "MCP Server (reference)"},
+        ],
+    },
+
+    # ── Env-var leak via Next.js NEXT_PUBLIC_ ──────────────────────────
+    {
+        "filename": "next-public-leak.js",
+        "description": "Next.js NEXT_PUBLIC_OPENAI_API_KEY hydration into the "
+                       "client bundle. The NEXT_PUBLIC_ prefix explicitly "
+                       "marks the variable as client-visible, so it's "
+                       "critical when paired with an AI provider name.",
+        "content": (
+            'const config = {\n'
+            f'  NEXT_PUBLIC_OPENAI_API_KEY: "{_FAKE_OPENAI_KEY}",\n'
+            '  NEXT_PUBLIC_API_BASE: "https://api.openai.com/v1",\n'
+            '};\n'
+            'export default config;\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-key-literal", "sdk_name": "Framework-public AI key leak"},
+            {"category": "ai-provider-url", "sdk_name": "OpenAI API endpoint"},
+        ],
+    },
+
+    # ── Bearer-header literal (bypasses SDK entirely) ──────────────────
+    {
+        "filename": "bearer-fetch.js",
+        "description": "Hand-written fetch() with hardcoded Bearer header — "
+                       "bypasses the SDK so prefix-only detection wouldn't "
+                       "fire. The Bearer-header constructor pattern catches it.",
+        "content": (
+            '// No SDK import — raw fetch with Bearer.\n'
+            'const data = await fetch("https://api.groq.com/openai/v1/chat/completions", {\n'
+            '  method: "POST",\n'
+            '  headers: {\n'
+            f'    "Authorization": "Bearer {_FAKE_GROQ_KEY}",\n'
+            '    "Content-Type": "application/json",\n'
+            '  },\n'
+            '  body: JSON.stringify({ messages: [] }),\n'
+            '});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-key-literal", "sdk_name": "Bearer-header AI key literal"},
+            {"category": "ai-provider-url", "sdk_name": "Groq API"},
+        ],
+    },
+
+    # ── Anthropic x-api-key header literal ─────────────────────────────
+    {
+        "filename": "anthropic-header.js",
+        "description": "Direct Anthropic call via fetch + x-api-key header "
+                       "(Anthropic uses x-api-key, not Bearer).",
+        "content": (
+            'await fetch("https://api.anthropic.com/v1/messages", {\n'
+            '  headers: {\n'
+            f'    "x-api-key": "{_FAKE_ANTHROPIC_KEY}",\n'
+            '    "anthropic-version": "2023-06-01",\n'
+            '  },\n'
+            '});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-key-literal", "sdk_name": "Anthropic x-api-key header literal"},
+            {"category": "ai-provider-url", "sdk_name": "Anthropic API endpoint"},
+        ],
+    },
+
+    # ── Open WebUI frontend markers ─────────────────────────────────────
+    {
+        "filename": "openwebui-frontend.js",
+        "description": "Open WebUI SvelteKit build constants — the type of "
+                       "marker the http_probe Wappalyzer pass cannot see "
+                       "because it lives in an async-loaded JS chunk.",
+        "content": (
+            'window.WEBUI_NAME = "Open WebUI";\n'
+            'window.WEBUI_VERSION = "0.3.32";\n'
+            'window.WEBUI_API_BASE_URL = "/api/v1";\n'
+            'fetch("/api/v1/chats");\n'
+            'fetch("/api/v1/models");\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-frontend-detected", "sdk_name": "Open WebUI"},
+        ],
+    },
+
+    # ── Gradio frontend markers ─────────────────────────────────────────
+    {
+        "filename": "gradio-frontend.js",
+        "description": "Gradio app — customElements.define('gradio-app', ...) "
+                       "+ window.gradio_config global. Both markers in one "
+                       "file; the frontend dedup logic must emit exactly one "
+                       "Gradio finding.",
+        "content": (
+            'customElements.define("gradio-app", class extends HTMLElement {});\n'
+            'window.gradio_config = { theme: "default" };\n'
+            'window.__gradio_mode__ = "stable";\n'
+            'fetch("/gradio_api/info");\n'
+            'fetch("/queue/join");\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-frontend-detected", "sdk_name": "Gradio"},
+        ],
+    },
+
+    # ── Flowise frontend markers ────────────────────────────────────────
+    {
+        "filename": "flowise-frontend.js",
+        "description": "Flowise React app — chatflowid constant + /api/v1/"
+                       "prediction route.",
+        "content": (
+            'const chatflowid = "abc-123-flowise";\n'
+            'const chatFlowDomain = "https://flowise.example.com";\n'
+            'await fetch("/api/v1/prediction/" + chatflowid);\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-frontend-detected", "sdk_name": "Flowise"},
+        ],
+    },
+
+    # ── SillyTavern frontend markers ────────────────────────────────────
+    {
+        "filename": "sillytavern-frontend.js",
+        "description": "SillyTavern — high abuse risk for hosted instances.",
+        "content": (
+            'const SillyTavernSettings = { mode: "chat" };\n'
+            'function loadSillyTavern() { return SillyTavernSettings; }\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-frontend-detected", "sdk_name": "SillyTavern"},
+        ],
+    },
+
+    # ── JSON-stringified browser flag (Next.js __NEXT_DATA__ shape) ────
+    {
+        "filename": "next-data-blob.js",
+        "description": "JSON-dehydrated React Server Components blob with the "
+                       "browser-mode flag in JSON-string form. Tests the "
+                       "loosened browser-flag regex that accepts quoted keys.",
+        "content": (
+            'window.__NEXT_DATA__ = {\n'
+            '  "props": {\n'
+            '    "pageProps": {\n'
+            '      "openaiConfig": {"dangerouslyAllowBrowser":true,"apiKey":"redacted"}\n'
+            '    }\n'
+            '  }\n'
+            '};\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-browser-allowed", "sdk_name": "dangerouslyAllowBrowser"},
+        ],
+    },
+
+    # ── Real-shaped minified bundle ─────────────────────────────────────
+    {
+        "filename": "minified-vendor.js",
+        "description": "Real-world minified shape: no whitespace, !0 truthy, "
+                       "comma-fused statements. Should still match every "
+                       "channel.",
+        "content": (
+            'var n;import OpenAI from"openai";'
+            'fetch("https://api.openai.com/v1/embeddings");'
+            f'var c=new OpenAI({{apiKey:"{_FAKE_OPENAI_KEY}",dangerouslyAllowBrowser:!0}});'
+            'export{c as default};'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "OpenAI"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "OpenAI SDK constructor"},
+            {"category": "ai-sdk-browser-allowed", "sdk_name": "dangerouslyAllowBrowser"},
+            {"category": "ai-provider-url", "sdk_name": "OpenAI API endpoint"},
+        ],
+    },
+
+    # ── HuggingFace constructor ─────────────────────────────────────────
+    {
+        "filename": "huggingface-inference.js",
+        "description": "HfInference positional constructor — captures the "
+                       "hf_ token literal.",
+        "content": (
+            'import { HfInference } from "@huggingface/inference";\n'
+            f'const hf = new HfInference("{_FAKE_HF_TOKEN}");\n'
+            'fetch("https://api-inference.huggingface.co/models/gpt2");\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "HuggingFace Inference"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "HuggingFace SDK constructor"},
+            {"category": "ai-provider-url", "sdk_name": "HuggingFace Inference API"},
+        ],
+    },
+
+    # ── Langfuse observability client ──────────────────────────────────
+    {
+        "filename": "langfuse-tracing.js",
+        "description": "Langfuse client with secret-key constructor — high "
+                       "severity (gives ingest access to the project's "
+                       "telemetry).",
+        "content": (
+            'import { Langfuse } from "langfuse";\n'
+            f'const lf = new Langfuse({{ secretKey: "{_FAKE_LANGFUSE_SECRET}", '
+            'publicKey: "pk-lf-12345678-1234-1234-1234-1234567890ab" }});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-client", "sdk_name": "Langfuse"},
+            {"category": "ai-sdk-key-literal", "sdk_name": "Langfuse SDK constructor (secretKey)"},
+        ],
+    },
+
+    # ── OpenRouter multi-provider router key ───────────────────────────
+    {
+        "filename": "openrouter-bearer.js",
+        "description": "OpenRouter Bearer — leaking this key drains credits "
+                       "across every model the user has configured.",
+        "content": (
+            'await fetch("https://openrouter.ai/api/v1/chat/completions", {\n'
+            f'  headers: {{ "Authorization": "Bearer {_FAKE_OPENROUTER_KEY}" }},\n'
+            '});\n'
+        ),
+        "expected_findings": [
+            {"category": "ai-sdk-key-literal", "sdk_name": "Bearer-header AI key literal"},
+            {"category": "ai-provider-url", "sdk_name": "OpenRouter API"},
+        ],
+    },
+
+    # ── Dedup test: a Secret AND an AI key on the same file ────────────
+    {
+        "filename": "secret-dup-test.js",
+        "description": "The existing JS_SECRET_PATTERNS scan catches this as "
+                       "a 'OpenAI API Key' Secret; our AI SDK scan ALSO "
+                       "catches the same byte range. The mixin must enrich "
+                       "the Secret with ai_provider rather than emit a "
+                       "parallel taxonomy.",
+        "content": (
+            f'const apiKey = "{_FAKE_OPENAI_USER_KEY}";\n'
+            'const ENDPOINT = "https://api.openai.com/v1/chat/completions";\n'
+            'fetch(ENDPOINT, { headers: { Authorization: "Bearer " + apiKey } });\n'
+        ),
+        "expected_findings": [
+            # Loose prefix matches the bare key
+            {"category": "ai-sdk-key-literal"},  # exact sdk_name varies (loose fallback)
+            {"category": "ai-provider-url", "sdk_name": "OpenAI API endpoint"},
+        ],
+    },
+
+    # ── NEGATIVE: clean jQuery bundle (must produce zero findings) ─────
+    {
+        "filename": "negative-jquery.js",
+        "description": "Clean jQuery bundle stub. Regression guard against "
+                       "catalogue regex over-reach.",
+        "content": (
+            '/*! jQuery v3.7.0 | (c) OpenJS Foundation */\n'
+            '(function(global, factory) {\n'
+            '  var jQuery = function(selector) { return new jQuery.fn.init(selector); };\n'
+            '  jQuery.fn = jQuery.prototype = { jquery: "3.7.0" };\n'
+            '})(window);\n'
+        ),
+        "expected_findings": [],
+    },
+
+    # ── NEGATIVE: Stripe-only (must NOT trigger AI patterns) ───────────
+    {
+        "filename": "negative-stripe.js",
+        "description": "Stripe SDK with a real Stripe key shape. The Stripe "
+                       "sk_live_ prefix must NOT trip any AI key pattern.",
+        "content": (
+            'import { loadStripe } from "@stripe/stripe-js";\n'
+            f'const stripe = await loadStripe("{_FAKE_STRIPE_KEY}");\n'
+            f'const awsKey = "{_FAKE_AWS_KEY}";\n'
+        ),
+        "expected_findings": [],
+    },
+]
+
+
+def js_recon_ai_sdk_paths() -> list[str]:
+    """Every JS fixture path the showroom serves. Pass to httpxPaths so the
+    fixtures get probed + downloaded by the recon pipeline."""
+    return [f"/static/{f['filename']}" for f in JS_RECON_AI_SDK_FIXTURES]

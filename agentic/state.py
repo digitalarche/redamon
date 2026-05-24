@@ -330,9 +330,58 @@ class OutputAnalysisInline(BaseModel):
 # DEEP THINK MODEL
 # =============================================================================
 
+class CompetingHypothesis(BaseModel):
+    """One candidate explanation for the current evidence.
+
+    Deep Think MUST emit >=2 of these whenever a chain finding with non-trivial
+    confidence is in scope. The point is to force the strategist to articulate
+    what ELSE the evidence could mean — and crucially, the single cheapest
+    probe that would tell the alternatives apart.
+
+    Without this structure, the model writes a high-confidence finding
+    ("NoSQL injection confirmed") on iter 7 from a single 500 differential,
+    and every subsequent deep-think starts from that as established fact.
+    With it, deep-think becomes a hypothesis-engineering exercise instead
+    of a brainstorm.
+    """
+    hypothesis: str = Field(
+        description=(
+            "One sentence stating what could explain the current evidence — "
+            "e.g., 'NoSQL injection in job_type' or 'SQL parse error from "
+            "non-string input crashing sqlite3.execute'."
+        )
+    )
+    supporting_evidence: str = Field(
+        description=(
+            "Cite the specific observation(s) that support THIS hypothesis. "
+            "Reference iteration numbers / step ids where possible."
+        )
+    )
+    disambiguating_probe: str = Field(
+        description=(
+            "ONE cheap, concrete test that would distinguish this hypothesis "
+            "from the OTHER hypotheses in this list. Describe the exact "
+            "tool call and what an expected confirming/refuting response looks like."
+        )
+    )
+
+
 class DeepThinkResult(BaseModel):
-    """Deep Think reasoning output — structured analysis before complex decisions."""
+    """Deep Think reasoning output — structured analysis before complex decisions.
+
+    The `competing_hypotheses` field is the structural fix for confirmation
+    bias: forcing the strategist to enumerate >=2 explanations for current
+    evidence prevents locking onto the first plausible-sounding inference.
+    """
     situation_assessment: str = Field(description="Current state summary")
+    competing_hypotheses: List[CompetingHypothesis] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED when any chain finding has confidence >= 60 OR when "
+            "trigger_reason is 'Unproductive streak detected'. Provide >=2 "
+            "competing explanations and the probe that would tell them apart."
+        ),
+    )
     attack_vectors_identified: List[str] = Field(default_factory=list, description="All possible attack vectors")
     recommended_approach: str = Field(description="Chosen approach and rationale")
     priority_order: List[str] = Field(default_factory=list, description="Ordered action steps")
@@ -1241,6 +1290,30 @@ def _group_trace_by_iteration(execution_trace: List[dict]) -> List[dict]:
     return result
 
 
+def _format_step_diagnostics(tool_entry: dict) -> str:
+    """Build the inline `[12ms, application_5xx_fast]` diagnostic suffix that
+    follows a tool's args in the chain context. Returns empty string when the
+    entry has no diagnostic data (older entries without duration_ms / error_class
+    written before this feature shipped — backward compatible).
+
+    Surfacing duration alongside error_class is the cheap fix for the
+    "all 12 SQL payloads returned 500" trap: 500-in-3ms and 500-in-150ms have
+    the same status code but completely different meanings (parse-time crash
+    vs. DB-level error), and the LLM cannot tell them apart from the status
+    code alone.
+    """
+    dur = tool_entry.get("duration_ms")
+    ec = tool_entry.get("error_class")
+    parts: list[str] = []
+    if isinstance(dur, (int, float)) and dur >= 0:
+        parts.append(f"{int(dur)}ms")
+    if ec and ec != "success":
+        parts.append(str(ec))
+    if not parts:
+        return ""
+    return f" [{', '.join(parts)}]"
+
+
 def format_chain_context(
     chain_findings: List[dict],
     chain_failures: List[dict],
@@ -1424,6 +1497,9 @@ def format_chain_context(
                     targs = t.get("tool_args") or {}
                     args_str = str(targs)[:80] if targs else ""
                     entry = f"{tname}({args_str})" if args_str else tname
+                    diag = _format_step_diagnostics(t)
+                    if diag:
+                        entry = f"{entry}{diag}"
                     if t.get("success", True):
                         raw = t.get("tool_output") or t.get("output_summary") or ""
                         if raw:
@@ -1467,16 +1543,21 @@ def format_chain_context(
                 for t in tools:
                     tname = t.get("tool_name") or "unknown"
                     tool_counts[tname] = tool_counts.get(tname, 0) + 1
+                    diag = _format_step_diagnostics(t)
                     if t.get("success", True):
                         ok_count += 1
                     else:
                         fail_count += 1
+                        # Annotate failed tools with their diagnostic class so
+                        # 12 "FAILED" lines aren't all the same to the LLM.
+                        ec = t.get("error_class") or ""
+                        ec_str = f"[{ec}] " if ec and ec != "success" else ""
                         failed_tools.append(
-                            f"{tname}: {(t.get('error_message') or '')[:300]}"
+                            f"{tname}{diag}: {ec_str}{(t.get('error_message') or '')[:300]}"
                         )
                     targs = t.get("tool_args") or {}
                     if targs:
-                        args_line = f"    - {tname}: {str(targs)[:300]}"
+                        args_line = f"    - {tname}{diag}: {str(targs)[:300]}"
                         preview = ""
                         if t.get("success", True):
                             raw = t.get("tool_output") or t.get("output_summary") or ""
@@ -1530,8 +1611,9 @@ def format_chain_context(
                 err = tool_entry.get("error_message") or ""
                 thought = tool_entry.get("thought", "")
                 output = tool_entry.get("tool_output", "")
+                diag = _format_step_diagnostics(tool_entry)
 
-                lines.append(f"  Step {it} [{phase}]: {tool}")
+                lines.append(f"  Step {it} [{phase}]: {tool}{diag}")
                 if thought:
                     lines.append(f"    Thought: {thought[:500]}")
                 if args and tool != "none":
@@ -1552,7 +1634,11 @@ def format_chain_context(
                         if raw_preview:
                             lines.append(f"    Raw: {raw_preview}")
                 else:
-                    lines.append(f"    FAILED | {err[:300]}")
+                    # Tag the FAILED line with error_class so the LLM
+                    # distinguishes a shell-quoting glitch from a real 4xx.
+                    ec = tool_entry.get("error_class") or ""
+                    ec_str = f"[{ec}] " if ec and ec != "success" else ""
+                    lines.append(f"    FAILED | {ec_str}{err[:300]}")
 
             # Full output for the very last iteration's last tool
             if is_last:

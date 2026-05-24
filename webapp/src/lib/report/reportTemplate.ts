@@ -1178,7 +1178,7 @@ function renderJsRecon(data: ReportData): string {
 <div class="page-break"></div>
 <div class="section" id="js-recon">
   <h2 class="section-title">JavaScript Reconnaissance</h2>
-  <p style="margin-bottom:12px">Deep analysis of JavaScript files revealed ${js.totalFindings} finding(s) across dependency confusion risks, source map exposure, DOM sinks, developer comments, and framework detection.</p>
+  <p style="margin-bottom:12px">Deep analysis of JavaScript files revealed ${js.totalFindings} finding(s) across dependency confusion risks, source map exposure, DOM sinks, developer comments, framework detection, and AI/LLM SDK exposure (vendor SDK imports, hard-coded provider API keys, the dangerouslyAllowBrowser opt-in, AI-frontend product markers, and provider base URLs visible in shipped JS chunks).</p>
   <div class="two-col">
     <div>
       <h3>By Severity</h3>

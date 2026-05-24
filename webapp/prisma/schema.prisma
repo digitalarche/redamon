@@ -487,6 +487,11 @@ model Project {
   jsReconCustomPackages       String   @default("")    @map("js_recon_custom_packages")
   jsReconCustomEndpointKeywords String @default("")    @map("js_recon_custom_endpoint_keywords")
   jsReconCustomFrameworks     String   @default("")    @map("js_recon_custom_frameworks")
+  // Adversarial AI surface recon Phase 6 — detect AI/LLM SDK imports,
+  // hard-coded provider keys, dangerouslyAllowBrowser flags, and AI-frontend
+  // product markers inside discovered JS bundles. Pure regex over data
+  // js_recon already harvested; no extra traffic.
+  jsReconAiSdkDetectionEnabled Boolean @default(true)  @map("js_recon_ai_sdk_detection_enabled")
 
   // ========== GRAPHQL SECURITY SCANNER ==========
   graphqlSecurityEnabled      Boolean  @default(false) @map("graphql_security_enabled")

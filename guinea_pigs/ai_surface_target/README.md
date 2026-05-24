@@ -178,6 +178,62 @@ Serves an HTML index at `/` linking to **21 catalogued AI paths** plus **8 unamb
 
 The classifier reads existing Endpoint + Parameter nodes from the graph after Katana finishes — no probe traffic of its own. Required project settings: `katanaEnabled=true`, `resourceEnumAiClassifierEnabled=true` (default on).
 
+### Port 9104 — JS Recon AI SDK showroom (Lap-3 / Phase 6)
+
+Serves an HTML index at `/` whose `<head>` carries `<script src='/static/...'>` tags for **23 fixture JS files**. Katana follows the script tags; js_recon downloads each file; `match_ai_sdk()` in [recon/helpers/ai_signal_catalog.py](../../recon/helpers/ai_signal_catalog.py) scans the content and emits `JsReconFinding` nodes with `finding_type` ∈ `{ai-sdk-client, ai-sdk-key-literal, ai-sdk-browser-allowed, ai-frontend-detected, ai-provider-url}`. The Phase 6 mixin then enriches matching `Secret` nodes (from the legacy `JS_SECRET_PATTERNS` pass) with the `ai_provider` property.
+
+Every fixture is engineered to exercise one specific detection branch. Together they cover every code path in `match_ai_sdk()`:
+
+| Fixture | Detection branch exercised |
+|---|---|
+| `openai-leaked.js` | OpenAI SDK import + constructor-context key (suppresses prefix duplicate) + dangerouslyAllowBrowser + base URL |
+| `anthropic-direct.js` | Anthropic SDK + Anthropic-format key + terser `!0` truthy form + base URL |
+| `gemini-with-context.js` | **Gemini disambiguation ESCALATES** (AIzaSy* + `@google/generative-ai` import + Gemini base URL → critical) |
+| `google-maps-key.js` | **Gemini disambiguation DOWNGRADES** (AIzaSy* without any Gemini context → medium, "likely Maps/Firebase") |
+| `langchain-stack.js` | Multi-vendor LangChain ecosystem imports (core, openai, anthropic, langgraph) |
+| `vercel-ai-multi.js` | Vercel AI SDK sub-imports + multiple provider packages |
+| `vector-dbs.js` | Pinecone + Qdrant + Chroma + Weaviate SDK clients + Pinecone constructor key |
+| `mcp-client.js` | MCP SDK + reference server imports |
+| `next-public-leak.js` | `NEXT_PUBLIC_OPENAI_API_KEY` env-var hydration (framework-public leak pattern) |
+| `bearer-fetch.js` | Hand-written `Authorization: Bearer <gsk_...>` header (bypasses SDK entirely) |
+| `anthropic-header.js` | Anthropic `x-api-key` header literal (Anthropic-specific, not Bearer) |
+| `openwebui-frontend.js` | Open WebUI markers (WEBUI_NAME, WEBUI_VERSION) — http_probe Wappalyzer pass cannot see these in async-loaded chunks |
+| `gradio-frontend.js` | Gradio markers (customElements.define + window.gradio_config + window.__gradio_mode__). Single-finding dedup test |
+| `flowise-frontend.js` | Flowise (chatflowid + /api/v1/prediction route) |
+| `sillytavern-frontend.js` | SillyTavern markers |
+| `next-data-blob.js` | JSON-stringified `"dangerouslyAllowBrowser":true` (the loosened browser-flag regex catches the quoted-key form found in `__NEXT_DATA__`) |
+| `minified-vendor.js` | Real minified shape — no whitespace, `!0`, comma-fused, mixed quotes |
+| `huggingface-inference.js` | HfInference positional-arg constructor + hf_ token + Inference API base URL |
+| `langfuse-tracing.js` | Langfuse client + secretKey constructor |
+| `openrouter-bearer.js` | OpenRouter Bearer (multi-provider router credit drain) |
+| `secret-dup-test.js` | **Mixin dedup/enrichment test** — the legacy JS_SECRET_PATTERNS scan AND our AI SDK scan both catch the same key. The mixin enriches the Secret with `ai_provider` rather than emit a parallel taxonomy |
+| `negative-jquery.js` | **Negative case** — clean jQuery stub. Must produce ZERO ai-sdk-* findings (regex over-reach regression) |
+| `negative-stripe.js` | **Negative case** — Stripe `sk_live_` + AWS `AKIA...` literals. Must NOT trip the OpenAI `sk-` prefix patterns |
+
+Required project settings: `jsReconEnabled=true`, `jsReconRegexPatterns=true` (for the dedup-enrichment test), `jsReconAiSdkDetectionEnabled=true` (default on), `katanaEnabled=true` (to discover the script tags).
+
+Manual smoke-check:
+```bash
+curl -s http://127.0.0.1:9104/ | head -20          # HTML index
+curl -s http://127.0.0.1:9104/static/openai-leaked.js | head -10
+curl -s http://127.0.0.1:9104/static/gemini-with-context.js
+```
+
+End-to-end validation (against the live recon image, no Neo4j required):
+```bash
+docker run --rm --entrypoint python3 \
+  -v "$(pwd)/../../:/work:ro" -w /work \
+  redamon-recon:latest -c "
+from recon.helpers.ai_signal_catalog import match_ai_sdk
+import urllib.request
+for f in ['openai-leaked', 'gemini-with-context', 'negative-jquery']:
+    js = urllib.request.urlopen(f'http://host.docker.internal:9104/static/{f}.js').read().decode()
+    findings = match_ai_sdk(js)
+    print(f'{f}: {len(findings)} findings')
+    for x in findings: print(' ', x['category'], x['sdk_name'])
+"
+```
+
 ## How to bring up
 
 ```bash

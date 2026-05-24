@@ -1778,14 +1778,44 @@ Note: JS Recon also creates Secret nodes with source='js_recon' and extra fields
 - validation_status (string): validated, invalid, unvalidated, skipped, incomplete
 - validation_info (string): JSON with validation details (scope, account info)
 - confidence (string): high, medium, low
-- detection_method (string): regex
+- detection_method (string): regex (or "ai_sdk_catalogue" when matched by Phase 6)
 - key_type (string): category of secret (cloud, payment, auth, etc.)
+- ai_provider (string, optional): set when the secret matches an AI provider
+   key shape via Phase 6 AI SDK detection (e.g. "OpenAI SDK constructor",
+   "Anthropic SDK constructor", "Langfuse Secret Key"). Lets queries pivot
+   from generic Secret to AI-context findings in one step.
+- ai_finding_id (string, optional): foreign key into the matching
+   JsReconFinding(finding_type='ai-sdk-key-literal') for full provenance.
+
+Adversarial AI Phase 6 - JS Recon AI SDK detection (lap 3):
+- New JsReconFinding finding_type values written by the AI SDK pass:
+  - 'ai-sdk-client'            (LLM/vector-DB/MCP SDK imports shipped to browser)
+  - 'ai-sdk-key-literal'       (hard-coded provider API key in the bundle)
+  - 'ai-sdk-browser-allowed'   (dangerouslyAllowBrowser: true / !0 opt-in)
+  - 'ai-frontend-detected'     (Open WebUI, Flowise, Langflow, Gradio, etc. in JS chunks)
+  - 'ai-provider-url'          (api.openai.com, api.anthropic.com, gateway URLs, etc.)
+- Each AI SDK finding carries:
+  - sdk_name (string): canonical product name (e.g. "OpenAI", "Anthropic",
+     "LangChain Core", "Pinecone", "Open WebUI")
+  - ai_provider (string): mirror of sdk_name for prefix-consistent queries
+  - severity (string): info | low | medium | high | critical
+  - confidence (string): low | medium | high
+  - byte_offset (int): position in the source JS file
+  - sample (string): redacted form of the captured value (first6 + "..." + last4)
+     when category=ai-sdk-key-literal, empty otherwise; never the full secret
 
 When user asks about "JS findings", "JavaScript attack surface", "JS secrets", or "what did JS Recon find":
 - First query JS file nodes: MATCH (jf:JsReconFinding {finding_type: 'js_file'})
 - Then traverse to findings: (jf)-[:HAS_JS_FINDING]->(finding), (jf)-[:HAS_SECRET]->(s), (jf)-[:HAS_ENDPOINT]->(e)
 - Query Secret nodes WHERE source = 'js_recon' for secrets
 - Query Endpoint nodes WHERE source = 'js_recon' for JS-extracted endpoints
+
+When user asks about "AI SDKs in JS", "leaked AI keys", "AnythingLLM/Open WebUI/LangChain in client bundle":
+- For all AI SDK findings: MATCH (jf:JsReconFinding) WHERE jf.finding_type STARTS WITH 'ai-' RETURN jf
+- For just leaked AI keys: MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'}) RETURN jf.sdk_name, jf.severity, jf.source_url, jf.sample
+- For dangerouslyAllowBrowser opt-ins: MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-browser-allowed'}) RETURN jf.source_url
+- To pivot from a leaked AI key to its enriched Secret node:
+  MATCH (s:Secret) WHERE s.ai_provider IS NOT NULL RETURN s.ai_provider, s.source_url, s.validation_status
 
 **ThreatPulse** - OTX threat intelligence pulses (named threat reports linking IPs/domains to adversaries)
 - pulse_id (string): OTX pulse ID (UNIQUE per tenant)
@@ -2440,11 +2470,51 @@ DEEP_THINK_PROMPT = """You are a senior penetration testing strategist performin
 
 Perform a deep, structured analysis of the current situation. Consider ALL possible attack vectors, evaluate trade-offs, and produce a clear action plan. Factor in the payload/tunnel configuration, Rules of Engagement constraints, and completed objectives when planning. Be concise but thorough.
 
+### Competing Hypotheses (REQUIRED when stuck or recovering)
+
+A single plausible explanation for the evidence is rarely the only one. Before recommending a pivot, you MUST enumerate >=2 competing hypotheses whenever EITHER of these holds:
+
+- The trigger is "Unproductive streak detected" — the streak proves your current hypothesis tree is wrong somewhere, so name >=2 candidates and the probe that distinguishes them
+- Any chain finding in scope has `confidence >= 60` — high-confidence findings are exactly where confirmation bias matters most
+
+For each hypothesis, fill THREE fields:
+  1. `hypothesis`           — one sentence: what could explain the evidence?
+  2. `supporting_evidence`  — cite specific iterations/steps that support it
+  3. `disambiguating_probe` — ONE cheap test that would tell hypotheses apart
+
+A worked example. Suppose iter 7 recorded "NoSQL injection (conf 85)" because `{{"$gt":""}}` returned 500 while strings returned 403. Two competing hypotheses:
+
+```json
+[
+  {{
+    "hypothesis": "NoSQL injection — backend passes JSON dict to a MongoDB query",
+    "supporting_evidence": "iter 7: {{\\"$gt\\":\\"\\"}} → 500; {{\\"$ne\\":\\"\\"}} → 500. JSON operator triggers a query crash, suggesting the value is interpolated into a Mongo find()",
+    "disambiguating_probe": "Send {{\\"job_type\\":42}} (a raw int, not a dict). Mongo would accept it; SQLite would TypeError. If 500 reproduces on bare int, the dict wasn't the cause."
+  }},
+  {{
+    "hypothesis": "SQL string concat with non-string input — sqlite3.execute crashes when payload isn't a str",
+    "supporting_evidence": "Same 500s, same shape. SQLite f-string concat would TypeError on any non-string. Dict and int both fail; string with no quote succeeds.",
+    "disambiguating_probe": "Send {{\\"job_type\\":\\"a'b\\"}} (a string with one quote). If SQLi the response will reflect a query parse error or quote-broken output. If NoSQL the quote is harmless."
+  }}
+]
+```
+
+The probe in EACH hypothesis is what makes this useful. A list of guesses with no test plan is a brainstorm; a list with disambiguating probes is a science experiment.
+
+If only one credible hypothesis exists, still emit it under `competing_hypotheses` and explicitly state "no credible alternative" in supporting_evidence — that way the strategist still considered the question, even if briefly.
+
 Output valid JSON matching this exact schema:
 {{
     "situation_assessment": "Brief summary of what we know and where we stand",
+    "competing_hypotheses": [
+        {{
+            "hypothesis": "One-sentence candidate explanation",
+            "supporting_evidence": "Cite iters/steps that support this hypothesis",
+            "disambiguating_probe": "ONE concrete test that distinguishes from the others"
+        }}
+    ],
     "attack_vectors_identified": ["vector1", "vector2", "..."],
-    "recommended_approach": "The chosen strategy and WHY it's the best path forward",
+    "recommended_approach": "The chosen strategy and WHY it's the best path forward. Reference which hypothesis it tests and how it would falsify the others.",
     "priority_order": ["step1", "step2", "step3", "..."],
     "risks_and_mitigations": "What could go wrong and how to handle it"
 }}

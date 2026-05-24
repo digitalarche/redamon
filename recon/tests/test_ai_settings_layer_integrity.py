@@ -44,6 +44,8 @@ AI_TOGGLES: list[tuple[str, str, str]] = [
     ("HTTP_PROBE_AI_FAVICON_HASH_ENABLED",     "httpProbeAiFaviconHashEnabled",     "http_probe_ai_favicon_hash_enabled"),
     ("HTTP_PROBE_AI_TITLE_DETECTION_ENABLED",  "httpProbeAiTitleDetectionEnabled",  "http_probe_ai_title_detection_enabled"),
     ("HTTP_PROBE_AI_WAPPALYZER_ENABLED",       "httpProbeAiWappalyzerEnabled",      "http_probe_ai_wappalyzer_enabled"),
+    # Phase 6 (js_recon AI SDK detection).
+    ("JS_RECON_AI_SDK_DETECTION_ENABLED",      "jsReconAiSdkDetectionEnabled",      "js_recon_ai_sdk_detection_enabled"),
 ]
 
 
@@ -293,7 +295,7 @@ def test_no_extra_lap1_ai_toggles_leaked_into_default_settings():
         if "AI" in k and any(
             k.startswith(prefix) for prefix in (
                 "DOMAIN_RECON_AI_", "PORT_SCAN_AI_", "MASSCAN_AI_",
-                "NMAP_AI_", "HTTP_PROBE_AI_",
+                "NMAP_AI_", "HTTP_PROBE_AI_", "JS_RECON_AI_",
             )
         )
     }

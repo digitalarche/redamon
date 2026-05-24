@@ -39,6 +39,7 @@ _output_fingerprint = _prod._output_fingerprint
 _read_productivity = _prod._read_productivity
 audit_productivity_claim = _prod.audit_productivity_claim
 build_productivity_audit_section = _prod.build_productivity_audit_section
+detect_uniform_response_anomaly = _prod.detect_uniform_response_anomaly
 downgrade_verdict_to_no_progress = _prod.downgrade_verdict_to_no_progress
 is_unproductive = _prod.is_unproductive
 
@@ -878,6 +879,261 @@ class TestSmokeRobustness(unittest.TestCase):
         # Should not crash even though args/iteration keys are missing.
         section = build_productivity_audit_section(trace)
         self.assertIsInstance(section, str)
+
+
+# ---------------------------------------------------------------------------
+# detect_uniform_response_anomaly — P3 (response-uniformity cliff detector)
+# ---------------------------------------------------------------------------
+
+def _uniform_step(*, error_class="application_5xx_fast", output="Internal Server Error",
+                  duration_ms=3, success=True, tool="execute_curl", args=None):
+    """Build a step dict shaped like execute_plan_node persists post-feature."""
+    return {
+        "tool_name": tool,
+        "tool_args": args or {"args": "-X POST http://target/"},
+        "tool_output": output,
+        "success": success,
+        "error_class": error_class,
+        "duration_ms": duration_ms,
+        "iteration": 1,
+    }
+
+
+class TestDetectUniformResponseAnomalyFiresCorrectly(unittest.TestCase):
+    """The exact failure mode from XBEN-006-24 iter 11: twelve different SQL
+    payloads all returned 500-in-3ms. Without this detector the LLM marked
+    SQLi 'tested' and pivoted away. With it, the prompt now carries a
+    warning that the input is being rejected at parse time."""
+
+    def test_fires_on_twelve_fast_5xx(self):
+        trace = [
+            _uniform_step(duration_ms=d)
+            for d in [3, 4, 2, 5, 3, 4, 2, 3, 5, 4, 3, 2]
+        ]
+        warning = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(warning, "Should fire on 12 fast 5xx in window")
+        self.assertIn("RESPONSE-UNIFORMITY ANOMALY", warning)
+        self.assertIn("application_5xx_fast", warning)
+        # Remediation hint must mention parse-time / early-guard for this class
+        self.assertIn("parse time", warning.lower())
+
+    def test_fires_on_six_shell_parser_errors(self):
+        trace = [
+            _uniform_step(
+                error_class="shell_parser_error",
+                output="[ERROR] No closing quotation",
+                duration_ms=8,
+                success=False,
+            )
+            for _ in range(6)
+        ]
+        warning = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(warning)
+        self.assertIn("shell_parser_error", warning)
+        # Hint must steer toward switching tool family
+        self.assertIn("execute_code", warning)
+
+    def test_fires_on_transport_error_streak(self):
+        trace = [
+            _uniform_step(
+                error_class="transport_error",
+                output="Could not resolve host",
+                duration_ms=15,
+                success=False,
+            )
+            for _ in range(5)
+        ]
+        warning = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(warning)
+        self.assertIn("transport_error", warning)
+
+    def test_fires_on_tool_internal_streak(self):
+        """The iter-6 file-read failure repeated five times would land here."""
+        trace = [
+            _uniform_step(
+                error_class="tool_internal_error",
+                output="[ERROR] execute_curl failed: returncode=26",
+                duration_ms=10,
+                success=False,
+            )
+            for _ in range(5)
+        ]
+        warning = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(warning)
+
+    def test_fires_on_uniform_4xx_streak(self):
+        """4xx is a real signal (server semantic rejection), not a parse-time
+        crash. The detector still fires because uniform 4xx across different
+        payloads means the layer under test isn't being exercised — the
+        request envelope is the problem."""
+        trace = [
+            _uniform_step(
+                error_class="application_4xx",
+                output="HTTP/1.1 405 Method Not Allowed",
+                duration_ms=10,
+            )
+            for _ in range(5)
+        ]
+        warning = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(warning)
+        self.assertIn("application_4xx", warning)
+
+
+class TestDetectUniformResponseAnomalyStaysSilent(unittest.TestCase):
+    """The detector must NOT cry wolf. Successful baselines, mixed latency,
+    too few samples, and legacy traces (no error_class) should all pass
+    through silently."""
+
+    def test_silent_on_clean_successes(self):
+        trace = [
+            _uniform_step(
+                error_class="success",
+                output='[{"id":1}]',
+                duration_ms=20,
+            )
+            for _ in range(8)
+        ]
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+    def test_silent_when_latency_breaks_fast_pattern(self):
+        """One 200ms call in the streak breaks 'rejected at the door' — the
+        request reached *something* deep enough to take real time."""
+        trace = [
+            _uniform_step(duration_ms=d)
+            for d in [3, 4, 5, 3, 200, 3, 4, 5]
+        ]
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+    def test_silent_below_min_count(self):
+        """4 fast 5xx is suspicious but not yet evidence — min_count=5."""
+        trace = [_uniform_step() for _ in range(4)]
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+    def test_silent_on_legacy_trace_without_error_class(self):
+        """Backward compat: steps written before P2 shipped have no
+        error_class field. They land in a '_legacy' bucket that never
+        reaches min_count, so the detector stays silent."""
+        trace = [
+            {
+                "tool_name": "execute_curl",
+                "tool_args": {"args": "-X GET /"},
+                "tool_output": "some body",
+                "success": False,
+                "duration_ms": 10,
+                # No error_class
+            }
+            for _ in range(8)
+        ]
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+    def test_silent_when_signatures_diverge(self):
+        """Mixed classes — no signature reaches min_count."""
+        trace = (
+            [_uniform_step(error_class="application_5xx_fast") for _ in range(3)] +
+            [_uniform_step(error_class="application_4xx") for _ in range(3)] +
+            [_uniform_step(error_class="success") for _ in range(2)]
+        )
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+    def test_silent_on_empty_trace(self):
+        self.assertIsNone(detect_uniform_response_anomaly([]))
+
+    def test_silent_on_zero_duration_treated_as_unknown(self):
+        """duration_ms=0 means timing wasn't captured. The 'fast' mask
+        requires d > 0 AND d < threshold, so unknown-timing streaks don't
+        fire false positives."""
+        trace = [
+            _uniform_step(duration_ms=0)
+            for _ in range(8)
+        ]
+        self.assertIsNone(detect_uniform_response_anomaly(trace))
+
+
+class TestDetectUniformResponseAnomalyBoundaries(unittest.TestCase):
+    """Window/threshold/tolerance edge cases — must behave predictably at
+    every boundary the orchestrator can configure via project_settings."""
+
+    def test_fires_exactly_at_min_count(self):
+        trace = [_uniform_step() for _ in range(5)]
+        self.assertIsNotNone(detect_uniform_response_anomaly(trace, min_count=5))
+
+    def test_silent_one_below_min_count(self):
+        trace = [_uniform_step() for _ in range(4)]
+        self.assertIsNone(detect_uniform_response_anomaly(trace, min_count=5))
+
+    def test_duration_threshold_boundary(self):
+        """All durations must be STRICTLY less than threshold."""
+        # 49ms with threshold=50 → fires
+        trace = [_uniform_step(duration_ms=49) for _ in range(5)]
+        self.assertIsNotNone(detect_uniform_response_anomaly(
+            trace, duration_threshold_ms=50,
+        ))
+        # 50ms with threshold=50 → silent (not strictly less)
+        trace = [_uniform_step(duration_ms=50) for _ in range(5)]
+        self.assertIsNone(detect_uniform_response_anomaly(
+            trace, duration_threshold_ms=50,
+        ))
+
+    def test_size_tolerance_groups_near_equal(self):
+        """Two responses of 21 and 31 bytes with size_tolerance=32 share
+        the same bucket (both fall in bucket 0: 21//32 = 31//32 = 0).
+        At exactly the tolerance boundary, sizes cross into the next
+        bucket — that's intentional (32//32 = 1, not 0)."""
+        trace = (
+            [_uniform_step(output="X" * 21) for _ in range(3)] +
+            [_uniform_step(output="X" * 31) for _ in range(3)]
+        )
+        self.assertIsNotNone(detect_uniform_response_anomaly(
+            trace, size_tolerance=32,
+        ))
+
+    def test_size_tolerance_separates_distant(self):
+        """A 2000-byte response and a 21-byte response must NOT share a
+        bucket — they came from different code paths."""
+        trace = (
+            [_uniform_step(output="X" * 21) for _ in range(3)] +
+            [_uniform_step(output="X" * 2000) for _ in range(3)]
+        )
+        # Neither half reaches min_count=5 by itself
+        self.assertIsNone(detect_uniform_response_anomaly(
+            trace, size_tolerance=32,
+        ))
+
+
+class TestDetectUniformResponseAnomalyOutputShape(unittest.TestCase):
+    """The warning is injected verbatim into the system prompt. Its shape
+    must be stable so prompt-budget calculations don't regress."""
+
+    def test_warning_has_required_sections(self):
+        trace = [_uniform_step() for _ in range(8)]
+        w = detect_uniform_response_anomaly(trace)
+        self.assertIsNotNone(w)
+        # Headers / cues the LLM was asked to look for
+        self.assertIn("## RESPONSE-UNIFORMITY ANOMALY", w)
+        self.assertIn("classification:", w)
+        self.assertIn("response size:", w)
+        self.assertIn("duration:", w)
+        self.assertIn("What to do:", w)
+        self.assertIn("INCONCLUSIVE, not NEGATIVE", w)
+
+    def test_warning_carries_class_specific_remediation(self):
+        """Each error_class should pull its own remediation hint, not a
+        generic 'try again'."""
+        # shell_parser_error → execute_code switch
+        trace = [
+            _uniform_step(error_class="shell_parser_error", success=False)
+            for _ in range(5)
+        ]
+        w = detect_uniform_response_anomaly(trace)
+        self.assertIn("execute_code", w)
+
+        # transport_error → reachability hint
+        trace = [
+            _uniform_step(error_class="transport_error", success=False)
+            for _ in range(5)
+        ]
+        w = detect_uniform_response_anomaly(trace)
+        self.assertIn("reachability", w.lower())
 
 
 if __name__ == "__main__":

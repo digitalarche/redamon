@@ -31,6 +31,7 @@ from orchestrator_helpers.llm_retry import retry_llm_call
 from orchestrator_helpers.productivity import (
     audit_productivity_claim,
     build_productivity_audit_section,
+    detect_uniform_response_anomaly,
     downgrade_verdict_to_no_progress,
     is_unproductive,
 )
@@ -218,8 +219,32 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                         dt_raw = dt_raw[:-3].strip()
                 dt_parsed = DeepThinkResult.model_validate_json(dt_raw)
 
+                # Render competing hypotheses prominently. They're the load-
+                # bearing section of deep-think now: each carries a hypothesis,
+                # the evidence behind it, and the single probe that distinguishes
+                # it from the alternatives. The next iteration's system prompt
+                # surfaces this verbatim so the LLM acts on disambiguating tests
+                # rather than confirming its existing belief.
+                if dt_parsed.competing_hypotheses:
+                    hyp_lines = []
+                    for i, h in enumerate(dt_parsed.competing_hypotheses, 1):
+                        hyp_lines.append(
+                            f"  {i}. **{h.hypothesis}**\n"
+                            f"     - Supporting: {h.supporting_evidence}\n"
+                            f"     - Disambiguating probe: {h.disambiguating_probe}"
+                        )
+                    hypotheses_block = (
+                        "**Competing Hypotheses (run a probe that distinguishes them — "
+                        "do not just confirm your favorite):**\n"
+                        + "\n".join(hyp_lines)
+                        + "\n\n"
+                    )
+                else:
+                    hypotheses_block = ""
+
                 deep_think_result = (
                     f"**Situation:** {dt_parsed.situation_assessment}\n\n"
+                    f"{hypotheses_block}"
                     f"**Attack Vectors:** {', '.join(dt_parsed.attack_vectors_identified)}\n\n"
                     f"**Approach:** {dt_parsed.recommended_approach}\n\n"
                     f"**Priority:** {' → '.join(dt_parsed.priority_order)}\n\n"
@@ -386,6 +411,27 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
     )
     if _audit_section:
         system_prompt += "\n" + _audit_section
+
+    # Response-uniformity anomaly: complementary to the productivity audit.
+    # The audit catches "same TOOL/ARGS pattern → no new info" (loops).
+    # The uniformity detector catches "DIFFERENT payloads → identical short-
+    # duration failure" — the signature of probes being short-circuited at
+    # parse time. Without this, the LLM marks vector classes 'tested' on
+    # the basis of failures that never reached the target layer.
+    _anomaly_warning = detect_uniform_response_anomaly(
+        exec_trace,
+        window=int(get_setting('UNIFORM_RESPONSE_WINDOW', 8)),
+        min_count=int(get_setting('UNIFORM_RESPONSE_MIN_COUNT', 5)),
+        duration_threshold_ms=int(
+            get_setting('UNIFORM_RESPONSE_DURATION_MS', 50)
+        ),
+    )
+    if _anomaly_warning:
+        system_prompt += "\n\n" + _anomaly_warning
+        logger.info(
+            f"[{user_id}/{project_id}/{session_id}] "
+            f"Uniform-response anomaly injected into prompt"
+        )
 
     # Surface any prior-iteration discrepancy note so the model sees it before
     # filling productivity again.
@@ -1109,6 +1155,13 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                 "tool_output": plan_step.get("tool_output"),
                 "success": plan_step.get("success", False),
                 "error_message": plan_step.get("error_message"),
+                # Diagnostic fields populated by execute_plan_node. Without
+                # propagating them here, the P1+P2 chain-context annotations
+                # (`[12ms, application_5xx_fast]`) and the P3 anomaly detector
+                # see nothing because plan-wave steps land in the trace
+                # without diagnostic data.
+                "duration_ms": plan_step.get("duration_ms"),
+                "error_class": plan_step.get("error_class"),
                 "output_analysis": step_output_analysis,
                 "actionable_findings": (analysis.actionable_findings or []) if analysis else [],
                 "recommended_next_steps": (analysis.recommended_next_steps or []) if analysis else [],

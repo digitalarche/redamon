@@ -2447,7 +2447,8 @@ The `JsReconFinding` label is used for two sub-types:
   id: "jsrf-{user_id}-{project_id}-{hash}",
   user_id: "{user_id}",
   project_id: "{project_id}",
-  finding_type: "dependency_confusion|source_map_exposure|dom_sink|framework|dev_comment|source_map_reference",
+  finding_type: "dependency_confusion|source_map_exposure|dom_sink|framework|dev_comment|source_map_reference
+                | ai-sdk-client | ai-sdk-key-literal | ai-sdk-browser-allowed | ai-frontend-detected | ai-provider-url",
   severity: "critical|high|medium|low|info",
   confidence: "high|medium|low",
   title: "Human-readable finding title",
@@ -2456,14 +2457,20 @@ The `JsReconFinding` label is used for two sub-types:
   source_url: "JS file URL where finding was discovered",
   base_url: "Parent BaseURL or 'upload'",
   source: "js_recon",
-  discovered_at: "ISO timestamp"
+  discovered_at: "ISO timestamp",
+  -- ai-sdk-* findings carry additional fields:
+  sdk_name: "OpenAI | Anthropic | LangChain Core | Pinecone | Open WebUI | ..." -- canonical product name
+  ai_provider: "<same as sdk_name>" -- mirror property for prefix-consistent queries (`WHERE jf.ai_provider IS NOT NULL`)
+  sample: "abc123...xyz9" -- redacted key (first6 + last4), empty for non-key categories. Never the full secret.
+  byte_offset: 12345 -- position in source JS, stable across re-scans (id is derived from sig including offset)
+  detection_method: "ai_sdk_catalogue" -- distinguishes from "regex" used by the legacy secret pass
 })
 ```
 
 **Relationships (hierarchical: parent -> file -> findings):**
 - `BaseURL -[:HAS_JS_FILE]-> JsReconFinding(js_file)` -- pipeline-crawled JS files
 - `Domain -[:HAS_JS_FILE]-> JsReconFinding(js_file)` -- uploaded JS files
-- `JsReconFinding(js_file) -[:HAS_JS_FINDING]-> JsReconFinding` -- findings from that file
+- `JsReconFinding(js_file) -[:HAS_JS_FINDING]-> JsReconFinding` -- findings from that file (includes ai-sdk-* findings)
 - `JsReconFinding(js_file) -[:HAS_SECRET]-> Secret` -- secrets found in that file
 - `JsReconFinding(js_file) -[:HAS_ENDPOINT]-> Endpoint` -- endpoints extracted from that file
 
@@ -2475,6 +2482,14 @@ JS Recon secrets extend the existing Secret node with:
 - `confidence`: high, medium, low
 - `detection_method`: regex
 - `key_type`: category (cloud, payment, auth, js_service, etc.)
+- `ai_provider`: (Phase 6) canonical AI provider product name when the secret matches an AI key shape AND the parent JS file
+  also has an ai-sdk-key-literal finding for the same captured value. Lets generic Secret queries pivot directly into
+  the AI-context taxonomy. Example values: `"OpenAI SDK constructor"`, `"Anthropic SDK constructor"`, `"Langfuse Secret Key"`.
+  Only set on Secret nodes whose `matched_text` starts with a known AI provider prefix (`sk-`, `hf_`, `lsv2_`, `gsk_`,
+  `r8_`, `pcsk_`, `pplx-`, `xai-`, `csk-`, `tgp_`, `pa-`, `AIzaSy`, `co_`, `rpa_`, `pk-lf-`, `fw_`) -- guarded to avoid
+  enriching Stripe / Slack / AWS literals that happen to co-locate in the same JS file.
+- `ai_finding_id`: foreign key into the matching `JsReconFinding(finding_type='ai-sdk-key-literal')` node for full
+  provenance (SDK constructor span, byte offset, sdk_name).
 
 ### Constraints & Indexes
 

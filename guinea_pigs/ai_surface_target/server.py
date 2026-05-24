@@ -26,6 +26,8 @@ from ai_signals import (
     ENDPOINT_AI_CLASSIFIER_PORT,
     HEADER_SHOWROOM_PORT,
     HEADER_VARIANTS,
+    JS_RECON_AI_SDK_FIXTURES,
+    JS_RECON_AI_SDK_PORT,
     PORT_LISTENERS,
     RESOURCE_ENUM_AI_PATHS,
     RESOURCE_ENUM_AI_RAG_PATHS,
@@ -335,6 +337,103 @@ def make_endpoint_ai_classifier_app() -> web.Application:
     return app
 
 
+# ---------------------------------------------------------------------------
+# Lap-3 (Phase 6) — js_recon AI SDK showroom (port 9104)
+#
+# Serves an HTML index that links to every fixture JS file via <script>
+# tags. Katana follows the script tags; js_recon downloads each .js, runs
+# match_ai_sdk() against the content, and writes JsReconFinding nodes with
+# finding_type ai-sdk-*. The mixin then enriches matching Secret nodes
+# with ai_provider.
+#
+# Each fixture is engineered to exercise one or more detection branches:
+#   - SDK imports (single + sub-path + multi-vendor)
+#   - constructor-context key literals (suppresses prefix duplicate)
+#   - prefix-anchored key literals (for SDK-less fetch calls)
+#   - dangerouslyAllowBrowser opt-in (bareword + terser !0 + JSON form)
+#   - Gemini disambiguation BOTH WAYS (with and without context)
+#   - frontend product markers (Open WebUI, Gradio, Flowise, SillyTavern)
+#   - provider base URLs (OpenAI, Anthropic, Groq, OpenRouter, etc.)
+#   - Bearer + x-api-key header literals
+#   - env-var hydration leak (NEXT_PUBLIC_*)
+#   - negative cases (jQuery, Stripe) for false-positive regression
+# ---------------------------------------------------------------------------
+
+def make_js_recon_ai_sdk_app() -> web.Application:
+    app = web.Application()
+
+    # Index of {filename: bytes} so the JS handler is O(1) per request.
+    fixtures_by_name = {f["filename"]: f for f in JS_RECON_AI_SDK_FIXTURES}
+
+    async def index(_request: web.Request) -> web.Response:
+        # Generate <script> tags so Katana picks up every JS file as a JS
+        # discovery edge. Also list them in a human-readable table.
+        script_tags = "\n".join(
+            f"  <script src='/static/{f['filename']}'></script>"
+            for f in JS_RECON_AI_SDK_FIXTURES
+        )
+        rows = []
+        for f in JS_RECON_AI_SDK_FIXTURES:
+            expected = ", ".join(
+                f"{e['category']}" + (f"({e.get('sdk_name', '?')})"
+                                       if 'sdk_name' in e else "")
+                for e in f["expected_findings"]
+            ) or "(none — negative case)"
+            rows.append(
+                f"  <tr>"
+                f"<td><a href='/static/{f['filename']}'><code>{f['filename']}</code></a></td>"
+                f"<td>{f['description']}</td>"
+                f"<td><code>{expected}</code></td>"
+                f"</tr>"
+            )
+        body = (
+            "<!DOCTYPE html><html><head>"
+            "<title>RedAmon JS Recon AI SDK Showroom</title>"
+            "<meta charset='utf-8'>"
+            "<style>table{border-collapse:collapse;font-family:monospace;}"
+            "th,td{border:1px solid #444;padding:6px;text-align:left;vertical-align:top;}"
+            "code{background:#eee;padding:1px 4px;}</style>"
+            f"{script_tags}\n"
+            "</head><body>"
+            "<h1>JS Recon AI SDK Showroom (Phase 6)</h1>"
+            f"<p>Serves {len(JS_RECON_AI_SDK_FIXTURES)} fixture JS files that "
+            "exercise every detection branch in <code>match_ai_sdk()</code>. "
+            "Katana follows the <code>&lt;script&gt;</code> tags above; "
+            "js_recon downloads each file and the catalogue emits "
+            "JsReconFinding nodes with finding_type <code>ai-sdk-*</code>.</p>"
+            "<table>"
+            "<thead><tr><th>Fixture</th><th>Purpose</th>"
+            "<th>Expected match_ai_sdk findings</th></tr></thead>"
+            "<tbody>" + "\n".join(rows) + "</tbody></table>"
+            "</body></html>"
+        )
+        return web.Response(text=body, content_type="text/html")
+
+    async def serve_js(request: web.Request) -> web.Response:
+        filename = request.match_info["filename"]
+        fixture = fixtures_by_name.get(filename)
+        if not fixture:
+            return web.Response(text=f"unknown fixture: {filename}",
+                                status=404, content_type="text/plain")
+        # NB: served as application/javascript so httpx/katana treat it as
+        # JS and js_recon downloads it. The content itself is what the AI
+        # SDK detection catalogue scans.
+        return web.Response(text=fixture["content"],
+                            content_type="application/javascript")
+
+    async def favicon(_r: web.Request) -> web.Response:
+        return _empty_favicon()
+
+    async def healthz(_r: web.Request) -> web.Response:
+        return web.Response(text="ok", content_type="text/plain")
+
+    app.router.add_get("/", index)
+    app.router.add_get("/static/{filename}", serve_js)
+    app.router.add_get("/favicon.ico", favicon)
+    app.router.add_get("/healthz", healthz)
+    return app
+
+
 def make_jsluice_target_app() -> web.Application:
     app = web.Application()
 
@@ -446,6 +545,16 @@ async def main() -> None:
             f"endpoint-ai-classifier showroom — "
             f"{len(RESOURCE_ENUM_AI_PATHS)} interface-type paths + "
             f"{len(RESOURCE_ENUM_AI_RAG_PATHS)} RAG paths",
+        )
+    )
+
+    # 6. Lap-3 (Phase 6) — js_recon AI SDK showroom
+    runners.append(
+        await _start_site(
+            make_js_recon_ai_sdk_app(),
+            JS_RECON_AI_SDK_PORT,
+            f"js-recon-ai-sdk showroom — {len(JS_RECON_AI_SDK_FIXTURES)} "
+            f"fixture JS files exercising match_ai_sdk() across all 5 channels",
         )
     )
 

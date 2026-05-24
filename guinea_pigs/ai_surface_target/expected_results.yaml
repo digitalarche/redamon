@@ -449,3 +449,217 @@ endpoint_ai_classifier:
     # Endpoints (one per unique path). The classifier doesn't create new nodes
     # — it only enriches existing Endpoint + Parameter rows.
     base_url_count: 1
+
+
+# ============================================================================
+# Lap-3 (Phase 6) — js_recon AI SDK detection
+#
+# When the scan finishes against the JS_RECON_AI_SDK_PORT (9104) showroom:
+#
+#   1. Katana discovers each /static/<filename>.js URL via the <script>
+#      tags in the index HTML, and creates Endpoint(source='js_recon') for
+#      each (or just records them as URLs that js_recon picks up).
+#   2. js_recon downloads each fixture, runs match_ai_sdk() against the
+#      content, and writes one JsReconFinding per detection. The mixin
+#      creates a parent JsReconFinding(finding_type='js_file') for each
+#      source URL too.
+#   3. For ai-sdk-key-literal findings whose captured_value matches an
+#      existing Secret on the same source_url (from JS_SECRET_PATTERNS),
+#      the Secret node is enriched with ai_provider + ai_finding_id.
+#
+# Expectations below are minimums — the catalogue is OR-friendly so a
+# single fixture may match multiple patterns (e.g. legacy + new Google
+# SDK names). The exact counts are an UPPER bound; assertions should use
+# >= for SDK imports and == for the disambiguation and dedup-test cases.
+# ============================================================================
+
+js_recon_ai_sdk:
+  base_url: "http://127.0.0.1:9104"
+
+  # 23 fixture JS files served at /static/<filename>.js. js_recon must
+  # create one JsReconFinding(finding_type='js_file') for each.
+  js_files_created: 23
+
+  # Per-fixture expectations. Each entry is a SUBSET assertion — the
+  # finding may exist with additional fields, but at minimum these
+  # category/sdk_name pairs MUST be present.
+  fixtures:
+    openai-leaked.js:
+      categories_present:
+        - ai-sdk-client          # "OpenAI" (top-level or sub-path import)
+        - ai-sdk-key-literal     # "OpenAI SDK constructor" (suppresses prefix duplicate)
+        - ai-sdk-browser-allowed # "dangerouslyAllowBrowser"
+        - ai-provider-url        # "OpenAI API endpoint"
+      # The constructor wins; exactly ONE ai-sdk-key-literal finding.
+      key_literal_count: 1
+      severity_max: critical
+
+    anthropic-direct.js:
+      categories_present:
+        - ai-sdk-client          # "Anthropic"
+        - ai-sdk-key-literal     # "Anthropic SDK constructor"
+        - ai-sdk-browser-allowed # via !0 terser form
+        - ai-provider-url
+      key_literal_count: 1
+      severity_max: critical
+
+    gemini-with-context.js:
+      categories_present:
+        - ai-sdk-client          # "Google Gemini (legacy SDK)" + "Google GenAI (unified)"
+        - ai-sdk-key-literal     # "Google Gemini SDK constructor" (CRITICAL — disambiguation escalates)
+        - ai-provider-url
+      key_literal_count: 1
+      severity_max: critical
+      # Disambiguation must escalate — sdk_name MUST contain "Gemini"
+      key_literal_sdk_name_contains: Gemini
+
+    google-maps-key.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Google API Key (likely Maps/Firebase)" (MEDIUM — downgrade)
+      key_literal_count: 1
+      severity_max: medium
+      key_literal_sdk_name_contains: Maps/Firebase
+
+    langchain-stack.js:
+      categories_present:
+        - ai-sdk-client          # multiple @langchain/* sub-packages
+      sdk_client_count_min: 4
+
+    vercel-ai-multi.js:
+      categories_present:
+        - ai-sdk-client          # ai/react + @ai-sdk/* sub-packages
+      sdk_client_count_min: 3
+
+    vector-dbs.js:
+      categories_present:
+        - ai-sdk-client          # Pinecone + Qdrant + Chroma + Weaviate
+        - ai-sdk-key-literal     # Pinecone constructor
+      sdk_client_count_min: 4
+
+    mcp-client.js:
+      categories_present:
+        - ai-sdk-client          # MCP SDK + MCP Server
+
+    next-public-leak.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Framework-public AI key leak"
+        - ai-provider-url
+      severity_max: critical
+
+    bearer-fetch.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Bearer-header AI key literal"
+        - ai-provider-url        # Groq
+
+    anthropic-header.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Anthropic x-api-key header literal"
+        - ai-provider-url
+
+    openwebui-frontend.js:
+      categories_present:
+        - ai-frontend-detected   # "Open WebUI"
+      frontend_count: 1
+
+    gradio-frontend.js:
+      categories_present:
+        - ai-frontend-detected   # "Gradio"
+      # Multiple Gradio markers in one file — must dedup to ONE finding.
+      frontend_count: 1
+
+    flowise-frontend.js:
+      categories_present:
+        - ai-frontend-detected
+
+    sillytavern-frontend.js:
+      categories_present:
+        - ai-frontend-detected
+
+    next-data-blob.js:
+      categories_present:
+        - ai-sdk-browser-allowed # JSON-quoted form
+      browser_allowed_count: 1
+
+    minified-vendor.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal
+        - ai-sdk-browser-allowed
+        - ai-provider-url
+
+    huggingface-inference.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal     # "HuggingFace SDK constructor"
+        - ai-provider-url
+
+    langfuse-tracing.js:
+      categories_present:
+        - ai-sdk-client
+        - ai-sdk-key-literal     # "Langfuse SDK constructor (secretKey)"
+
+    openrouter-bearer.js:
+      categories_present:
+        - ai-sdk-key-literal     # "Bearer-header AI key literal"
+        - ai-provider-url
+
+    secret-dup-test.js:
+      categories_present:
+        - ai-sdk-key-literal
+        - ai-provider-url
+      # CRITICAL: the legacy JS_SECRET_PATTERNS Secret node for this file
+      # must be enriched by the Phase 6 mixin. After the scan:
+      #   MATCH (s:Secret {source_url: '<file_url>'}) RETURN s.ai_provider
+      # must return a non-null value matching the AI key prefix.
+      mixin_enrichment:
+        secret_ai_provider_not_null: true
+
+    negative-jquery.js:
+      categories_present: []    # MUST produce zero ai-sdk-* findings
+
+    negative-stripe.js:
+      categories_present: []    # MUST produce zero ai-sdk-* findings
+      # Negative invariant: Stripe sk_live_ + AWS AKIA literals must NOT
+      # trip any AI key pattern. If this fails, the catalogue is too greedy.
+
+  # Global Cypher invariants — agent-level assertions the e2e driver can run.
+  cypher_invariants:
+    # The two negative fixtures together must NOT contribute any ai-sdk-*
+    # finding to the graph.
+    no_ai_findings_on_negatives: |
+      MATCH (jf:JsReconFinding)
+      WHERE jf.source_url CONTAINS '/static/negative-'
+        AND jf.finding_type STARTS WITH 'ai-'
+      RETURN count(jf) AS n  // expected: 0
+
+    # The Gemini-with-context fixture must produce a critical AI key finding.
+    gemini_escalation: |
+      MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'})
+      WHERE jf.source_url CONTAINS '/static/gemini-with-context.js'
+        AND jf.sdk_name CONTAINS 'Gemini'
+        AND jf.severity = 'critical'
+      RETURN count(jf) AS n  // expected: 1
+
+    # The Maps-only fixture must produce a medium AI key finding tagged
+    # as Maps/Firebase.
+    maps_downgrade: |
+      MATCH (jf:JsReconFinding {finding_type: 'ai-sdk-key-literal'})
+      WHERE jf.source_url CONTAINS '/static/google-maps-key.js'
+        AND jf.sdk_name CONTAINS 'Maps/Firebase'
+        AND jf.severity = 'medium'
+      RETURN count(jf) AS n  // expected: 1
+
+    # The secret-dup-test fixture must enrich its Secret with ai_provider.
+    secret_enrichment: |
+      MATCH (s:Secret)
+      WHERE s.source_url CONTAINS '/static/secret-dup-test.js'
+        AND s.ai_provider IS NOT NULL
+      RETURN count(s) AS n  // expected: >=1
+
+    # Across all fixtures, at least 5 distinct categories must be represented.
+    category_diversity: |
+      MATCH (jf:JsReconFinding)
+      WHERE jf.finding_type IN ['ai-sdk-client','ai-sdk-key-literal',
+                                  'ai-sdk-browser-allowed','ai-frontend-detected',
+                                  'ai-provider-url']
+      RETURN count(DISTINCT jf.finding_type) AS n  // expected: 5

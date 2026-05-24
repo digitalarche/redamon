@@ -404,6 +404,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'JS_RECON_CUSTOM_PACKAGES': '',
     'JS_RECON_CUSTOM_ENDPOINT_KEYWORDS': '',
     'JS_RECON_CUSTOM_FRAMEWORKS': '',
+    # AI SDK detection — Phase 6 of the Adversarial AI surface recon rollout.
+    # Scans every analysed JS file for AI/LLM SDK imports, hard-coded provider
+    # keys, ``dangerouslyAllowBrowser`` flags, and AI-frontend product markers
+    # that http_probe's Wappalyzer pass cannot see (those live in async-loaded
+    # chunks, not the initial HTML body). Default on — pure regex over data
+    # js_recon already harvested, sends no additional traffic.
+    'JS_RECON_AI_SDK_DETECTION_ENABLED': True,
 
     # FFuf Directory Fuzzer
     'FFUF_ENABLED': False,
@@ -977,6 +984,7 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['JS_RECON_CUSTOM_PACKAGES'] = project.get('jsReconCustomPackages', DEFAULT_SETTINGS['JS_RECON_CUSTOM_PACKAGES'])
     settings['JS_RECON_CUSTOM_ENDPOINT_KEYWORDS'] = project.get('jsReconCustomEndpointKeywords', DEFAULT_SETTINGS['JS_RECON_CUSTOM_ENDPOINT_KEYWORDS'])
     settings['JS_RECON_CUSTOM_FRAMEWORKS'] = project.get('jsReconCustomFrameworks', DEFAULT_SETTINGS['JS_RECON_CUSTOM_FRAMEWORKS'])
+    settings['JS_RECON_AI_SDK_DETECTION_ENABLED'] = project.get('jsReconAiSdkDetectionEnabled', DEFAULT_SETTINGS['JS_RECON_AI_SDK_DETECTION_ENABLED'])
 
     # FFuf Directory Fuzzer
     settings['FFUF_ENABLED'] = project.get('ffufEnabled', DEFAULT_SETTINGS['FFUF_ENABLED'])

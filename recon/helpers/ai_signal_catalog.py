@@ -599,8 +599,494 @@ AI_TOOL_ARG_PATH_DIALECTS: list[tuple[str, str]] = [
 # lap lands. Leaving them present-but-empty keeps the import path stable so
 # adding a new lap is a content-only change, never a structural one.
 
-# js_recon — AI SDK import regex
-AI_SDK_IMPORT_REGEX: list[tuple[Pattern[str], str, str]] = []
+# ---------------------------------------------------------------------------
+# js_recon  (AI_SURFACE_RECON.md §2.1 #7)
+# ---------------------------------------------------------------------------
+#
+# Detects AI/LLM signals inside JavaScript bundles harvested by the js_recon
+# module. Four signal families share a single catalogue:
+#
+#   - ``ai-sdk-client``           SDK import strings (npm package names that
+#                                 survive minification as string literals).
+#   - ``ai-sdk-key-literal``      Provider API keys hard-coded into bundles.
+#                                 Two tiers: prefix-anchored (high confidence
+#                                 on the format alone) and constructor-context
+#                                 (paired with the SDK class to suppress FPs).
+#   - ``ai-sdk-browser-allowed``  Explicit ``dangerouslyAllowBrowser: true``
+#                                 escape hatch — means the developer knew the
+#                                 key would reach the client and opted in.
+#   - ``ai-frontend-detected``    Product markers in shipped JS chunks that
+#                                 the http_probe HTML/title channels miss
+#                                 (Open WebUI, Flowise, Langflow, Dify, …).
+#
+# Each entry is a tuple ``(pattern, sdk_name, category, severity, confidence)``.
+# The helper ``match_ai_sdk(content)`` runs all four families against one JS
+# blob and returns deduplicated findings; constructor-context matches suppress
+# overlapping prefix-anchored matches on the same byte range.
+
+# Prefix-anchored API key formats. Each pattern matches the key in isolation;
+# confidence reflects how often the format collides with non-AI strings
+# (Stripe pk_live_*, Mapbox pk., random hex blobs, etc.).
+AI_KEY_PREFIX_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    # OpenAI family. The "T3BlbkFJ" infix is the base64 of "OpenAI" with
+    # padding shaved — present in every modern OpenAI key, very high signal.
+    (re.compile(r"\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b"),
+     "OpenAI (legacy user key)", "critical", "high"),
+    (re.compile(r"\bsk-proj-[A-Za-z0-9_\-]{40,}T3BlbkFJ[A-Za-z0-9_\-]{40,}\b"),
+     "OpenAI Project Key", "critical", "high"),
+    (re.compile(r"\bsk-svcacct-[A-Za-z0-9_\-]{40,}T3BlbkFJ[A-Za-z0-9_\-]{40,}\b"),
+     "OpenAI Service Account Key", "critical", "high"),
+    (re.compile(r"\bsk-admin-[A-Za-z0-9_\-]{40,}T3BlbkFJ[A-Za-z0-9_\-]{40,}\b"),
+     "OpenAI Admin Key", "critical", "high"),
+    (re.compile(r"\bsk-None-[A-Za-z0-9]{40,}T3BlbkFJ[A-Za-z0-9]{40,}\b"),
+     "OpenAI User-Scoped Key", "critical", "high"),
+    # Anthropic. Current format ends with literal "AA" (base64 padding).
+    (re.compile(r"\bsk-ant-api03-[A-Za-z0-9_\-]{93}AA\b"),
+     "Anthropic API Key", "critical", "high"),
+    (re.compile(r"\bsk-ant-admin01-[A-Za-z0-9_\-]{93}AA\b"),
+     "Anthropic Admin Key", "critical", "high"),
+    (re.compile(r"\bsk-ant-sid01-[A-Za-z0-9_\-]{93}AA\b"),
+     "Anthropic Session ID", "high", "high"),
+    # HuggingFace.
+    (re.compile(r"\bhf_[A-Za-z]{34,40}\b"),
+     "HuggingFace Token", "high", "high"),
+    (re.compile(r"\bapi_org_[A-Za-z0-9]{34}\b"),
+     "HuggingFace Org Token (legacy)", "high", "high"),
+    # LangSmith / LangChain.
+    (re.compile(r"\blsv2_pt_[a-f0-9]{32}_[a-f0-9]{10}\b"),
+     "LangSmith Personal Access Token", "high", "high"),
+    (re.compile(r"\blsv2_sk_[a-f0-9]{32}_[a-f0-9]{10}\b"),
+     "LangSmith Service Key", "critical", "high"),
+    (re.compile(r"\bls__[a-f0-9]{32}\b"),
+     "LangChain Key (legacy)", "high", "medium"),
+    # Langfuse.
+    (re.compile(r"\bpk-lf-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b"),
+     "Langfuse Public Key", "medium", "high"),
+    (re.compile(r"\bsk-lf-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b"),
+     "Langfuse Secret Key", "critical", "high"),
+    # Replicate.
+    (re.compile(r"\br8_[A-Za-z0-9]{37,40}\b"),
+     "Replicate Token", "high", "high"),
+    # Cohere (post-2024 prefixed format).
+    (re.compile(r"\bco_[A-Za-z0-9]{48}\b"),
+     "Cohere API Key", "high", "high"),
+    # Groq.
+    (re.compile(r"\bgsk_[A-Za-z0-9]{52}\b"),
+     "Groq API Key", "high", "high"),
+    # Together AI v1.
+    (re.compile(r"\btgp_v1_[A-Za-z0-9_\-]{43}\b"),
+     "Together AI Key (v1)", "high", "high"),
+    # Fireworks (legacy fw_ prefix; newer keys are bare hex — context-only).
+    (re.compile(r"\bfw_[A-Za-z0-9]{20,40}\b"),
+     "Fireworks AI Key (fw_)", "high", "medium"),
+    # Perplexity.
+    (re.compile(r"\bpplx-[a-f0-9]{48,64}\b"),
+     "Perplexity API Key", "high", "high"),
+    # Voyage AI.
+    (re.compile(r"\bpa-[A-Za-z0-9_\-]{40,50}\b"),
+     "Voyage AI Key", "high", "high"),
+    (re.compile(r"\bal-[A-Za-z0-9_\-]{40,50}\b"),
+     "Voyage AI Key (MongoDB Atlas)", "high", "high"),
+    # RunPod scoped API key (post-Nov 2024).
+    (re.compile(r"\brpa_[A-Za-z0-9]{32,64}\b"),
+     "RunPod Scoped API Key", "high", "high"),
+    # Modal — two-part credential.
+    (re.compile(r"\bak-[A-Za-z0-9]{22}\b"),
+     "Modal Token ID", "high", "high"),
+    (re.compile(r"\bas-[A-Za-z0-9]{22}\b"),
+     "Modal Token Secret", "critical", "high"),
+    # Helicone proxy.
+    (re.compile(r"\bsk-helicone-cp-[A-Za-z0-9_\-]{40,}\b"),
+     "Helicone Control-Plane Key", "critical", "high"),
+    (re.compile(r"\bsk-helicone-[A-Za-z0-9_\-]{40,}\b"),
+     "Helicone API Key", "high", "high"),
+    # Pinecone.
+    (re.compile(r"\bpcsk_[A-Za-z0-9_]{50,80}\b"),
+     "Pinecone API Key", "high", "high"),
+    # xAI / Grok.
+    (re.compile(r"\bxai-[A-Za-z0-9]{80}\b"),
+     "xAI (Grok) API Key", "high", "high"),
+    # Cerebras Cloud.
+    (re.compile(r"\bcsk-[a-z0-9]{50,60}\b"),
+     "Cerebras API Key", "high", "high"),
+    # OpenRouter — multi-provider router key (drains credit across all models).
+    (re.compile(r"\bsk-or-v1-[a-f0-9]{64}\b"),
+     "OpenRouter API Key", "high", "high"),
+    # Google AI — ambiguous on its own (same shape as Maps/Firebase). The
+    # match_ai_sdk helper disambiguates by scanning the surrounding ±2KB for
+    # Gemini SDK names / base URLs before assigning severity.
+    (re.compile(r"\bAIzaSy[A-Za-z0-9_\-]{33}\b"),
+     "Google API Key (ambiguous)", "medium", "low"),
+]
+
+# Constructor-context patterns. Pair the SDK class name with the apiKey
+# literal so the match is virtually free of false positives. These run
+# before the prefix-anchored patterns and suppress overlapping hits on the
+# same byte range. Terser commonly rewrites `true` → `!0`; the catalogue
+# accepts both.
+AI_KEY_CONSTRUCTOR_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    # OpenAI SDK is also the canonical client for Groq, DeepSeek, Perplexity,
+    # Together, Fireworks, OpenRouter (they all override baseURL). One regex
+    # covers all of them; the literal value will be classified separately.
+    (re.compile(r"""new\s+OpenAI\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["']([A-Za-z0-9_\-]{16,200})["']"""),
+     "OpenAI SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Anthropic\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["'](sk-ant-[A-Za-z0-9_\-]{80,})["']"""),
+     "Anthropic SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+(?:GoogleGenerativeAI|GoogleGenAI)\s*\(\s*["'](AIzaSy[A-Za-z0-9_\-]{33})["']"""),
+     "Google Gemini SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+(?:GoogleGenerativeAI|GoogleGenAI)\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["'](AIzaSy[A-Za-z0-9_\-]{33})["']"""),
+     "Google Gemini SDK constructor (object form)", "critical", "high"),
+    (re.compile(r"""new\s+CohereClient(?:V2)?\s*\(\s*\{[^}]{0,400}?token\s*:\s*["']([A-Za-z0-9]{40,60})["']"""),
+     "Cohere SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Mistral(?:Client)?\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["']([A-Za-z0-9]{20,60})["']"""),
+     "Mistral SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Groq\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["'](gsk_[A-Za-z0-9]{52})["']"""),
+     "Groq SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Together\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["']([A-Za-z0-9_\-]{40,80})["']"""),
+     "Together AI SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Replicate\s*\(\s*\{[^}]{0,400}?auth\s*:\s*["'](r8_[A-Za-z0-9]{37,40})["']"""),
+     "Replicate SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+HfInference\s*\(\s*["'](hf_[A-Za-z]{30,40})["']"""),
+     "HuggingFace SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Pinecone\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["'](pcsk_[A-Za-z0-9_]{50,80})["']"""),
+     "Pinecone SDK constructor", "critical", "high"),
+    (re.compile(r"""new\s+Portkey\s*\(\s*\{[^}]{0,400}?apiKey\s*:\s*["']([A-Za-z0-9_\-]{20,80})["']"""),
+     "Portkey SDK constructor", "critical", "high"),
+    (re.compile(r"""Langfuse\s*\(\s*\{[^}]{0,500}?secretKey\s*:\s*["'](sk-lf-[a-f0-9\-]{36})["']"""),
+     "Langfuse SDK constructor (secretKey)", "critical", "high"),
+    # Env-var hydration into client bundles — Next.js (NEXT_PUBLIC_*), Vite
+    # (VITE_*), CRA (REACT_APP_*), Expo (EXPO_PUBLIC_*), Nuxt (NUXT_PUBLIC_*).
+    # These prefixes EXPLICITLY mark a variable as client-visible, so an AI
+    # provider name following one is critical by definition.
+    (re.compile(
+        r"(?:NEXT_PUBLIC|VITE|REACT_APP|VUE_APP|NUXT_PUBLIC|EXPO_PUBLIC)_"
+        r"(?:OPENAI|ANTHROPIC|GEMINI|GROQ|TOGETHER|MISTRAL|COHERE|REPLICATE|"
+        r"HUGGINGFACE|HF|FIREWORKS|PERPLEXITY|DEEPSEEK|XAI|OPENROUTER|VOYAGE|"
+        r"PINECONE|LANGFUSE|HELICONE|PORTKEY)_[A-Z_]*KEY[\"']?\s*[:=]\s*"
+        r"[\"']([^\"']{20,200})[\"']"),
+     "Framework-public AI key leak", "critical", "high"),
+    # Generic env-var literal assignments in bundles (process.env shimmed,
+    # bundle-time replacements).
+    (re.compile(
+        r"(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GROQ_API_KEY|TOGETHER_API_KEY|"
+        r"MISTRAL_API_KEY|COHERE_API_KEY|REPLICATE_API_TOKEN|"
+        r"HUGGINGFACE_API_KEY|HF_TOKEN|FIREWORKS_API_KEY|PERPLEXITY_API_KEY|"
+        r"GOOGLE_API_KEY|GEMINI_API_KEY|DEEPSEEK_API_KEY|XAI_API_KEY|"
+        r"OPENROUTER_API_KEY|VOYAGE_API_KEY|PINECONE_API_KEY|"
+        r"LANGFUSE_SECRET_KEY|LANGFUSE_PUBLIC_KEY|HELICONE_API_KEY|"
+        r"PORTKEY_API_KEY|LANGCHAIN_API_KEY|LANGSMITH_API_KEY)[\"']?\s*[:=]\s*"
+        r"[\"']([A-Za-z0-9_\-\.]{20,200})[\"']"),
+     "AI env var leak (generic)", "critical", "high"),
+    # Hand-written fetch() Authorization headers (bypassed the SDK entirely).
+    # The prefix alternation must cover every AI-vendor key shape we ship in
+    # AI_KEY_PREFIX_PATTERNS — leaving any out means a hand-rolled fetch
+    # call to that vendor isn't caught even though the leaked key is just as
+    # damaging as one inside an SDK constructor. Mirrors the mixin's
+    # AI-prefix enrichment guard (graph_db/mixins/recon/js_recon_mixin.py).
+    (re.compile(
+        r"""["']Authorization["']\s*:\s*["']Bearer\s+"""
+        r"""((?:sk-(?:proj-|svcacct-|admin-|None-|ant-(?:api03-|admin01-|sid01-)?|or-v1-|helicone-(?:cp-)?|lf-)?"""
+        r"""|hf_|api_org_|lsv2_(?:pt|sk)_|ls__|r8_|co_|gsk_|tgp_v1_|fw_|pplx-"""
+        r"""|pa-|al-|rpa_|ak-|as-|pcsk_|xai-|csk-|esecret_)"""
+        r"""[A-Za-z0-9_\-]{20,200})["']"""),
+     "Bearer-header AI key literal", "critical", "high"),
+    (re.compile(r"""["']x-api-key["']\s*:\s*["'](sk-ant-[A-Za-z0-9_\-]{80,})["']"""),
+     "Anthropic x-api-key header literal", "critical", "high"),
+    (re.compile(r"""["']x-goog-api-key["']\s*:\s*["'](AIzaSy[A-Za-z0-9_\-]{33})["']"""),
+     "Google API key header literal", "critical", "high"),
+]
+
+# SDK import strings. Both ESM (``from "pkg"``) and CommonJS
+# (``require("pkg")``) wrap the package name in identical string literals,
+# so a single quote-bounded literal regex covers both forms. Sub-path imports
+# (``pkg/sub/path``) are critical because tree-shaking may keep only the deep
+# sub-path even when the top-level package literal gets shaken out.
+AI_SDK_IMPORT_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    # OpenAI family.
+    (re.compile(r"""["']openai["']"""),
+     "OpenAI", "medium", "medium"),
+    (re.compile(r"""["']openai/(?:resources|core|streaming|index\.mjs|shims|version|_shims)[\w/.\-]*["']"""),
+     "OpenAI (sub-path)", "high", "high"),
+    (re.compile(r"""["']openai-edge["']"""),
+     "OpenAI Edge (legacy)", "medium", "high"),
+    (re.compile(r"""["']openai-streams(?:/[\w\-]+)?["']"""),
+     "OpenAI Streams", "medium", "high"),
+    # Anthropic family.
+    (re.compile(r"""["']@anthropic-ai/sdk["']"""),
+     "Anthropic", "high", "high"),
+    (re.compile(r"""["']@anthropic-ai/sdk/[\w/.\-]+["']"""),
+     "Anthropic (sub-path)", "high", "high"),
+    (re.compile(r"""["']@anthropic-ai/vertex-sdk["']"""),
+     "Anthropic Vertex", "high", "high"),
+    (re.compile(r"""["']@anthropic-ai/bedrock-sdk["']"""),
+     "Anthropic Bedrock", "high", "high"),
+    # Google.
+    (re.compile(r"""["']@google/generative-ai["']"""),
+     "Google Gemini (legacy SDK)", "high", "high"),
+    (re.compile(r"""["']@google/genai["']"""),
+     "Google GenAI (unified)", "high", "high"),
+    (re.compile(r"""["']@google-cloud/vertexai["']"""),
+     "Google Vertex AI", "high", "high"),
+    (re.compile(r"""["']@google-cloud/aiplatform["']"""),
+     "Google AI Platform", "high", "high"),
+    # Cohere, Mistral, Groq, Together, Fireworks, Replicate.
+    (re.compile(r"""["']cohere-ai(?:/[\w/.\-]+)?["']"""),
+     "Cohere", "high", "high"),
+    (re.compile(r"""["']cohere-client-fetch["']"""),
+     "Cohere Fetch Client", "high", "high"),
+    (re.compile(r"""["']@mistralai/mistralai(?:/[\w/.\-]+)?["']"""),
+     "Mistral", "high", "high"),
+    (re.compile(r"""["']groq-sdk["']"""),
+     "Groq", "high", "high"),
+    (re.compile(r"""["']together-ai["']"""),
+     "Together AI", "high", "high"),
+    (re.compile(r"""["']fireworks-ai["']"""),
+     "Fireworks AI", "high", "high"),
+    (re.compile(r"""["']replicate["']"""),
+     "Replicate", "high", "high"),
+    # HuggingFace.
+    (re.compile(r"""["']@huggingface/inference["']"""),
+     "HuggingFace Inference", "high", "high"),
+    (re.compile(r"""["']@huggingface/hub["']"""),
+     "HuggingFace Hub", "medium", "high"),
+    (re.compile(r"""["']@huggingface/transformers["']"""),
+     "HuggingFace Transformers.js", "medium", "high"),
+    (re.compile(r"""["']@huggingface/agents["']"""),
+     "HuggingFace Agents", "medium", "high"),
+    # Voyage.
+    (re.compile(r"""["']voyageai["']"""),
+     "Voyage AI", "high", "high"),
+    # AWS Bedrock / SageMaker.
+    (re.compile(r"""["']@aws-sdk/client-bedrock-runtime["']"""),
+     "AWS Bedrock Runtime", "high", "high"),
+    (re.compile(r"""["']@aws-sdk/client-bedrock-agent-runtime["']"""),
+     "AWS Bedrock Agent Runtime", "high", "high"),
+    (re.compile(r"""["']@aws-sdk/client-bedrock["']"""),
+     "AWS Bedrock Control Plane", "high", "high"),
+    (re.compile(r"""["']@aws-sdk/client-sagemaker-runtime["']"""),
+     "AWS SageMaker Runtime", "high", "high"),
+    # Azure.
+    (re.compile(r"""["']@azure/openai["']"""),
+     "Azure OpenAI (legacy)", "high", "high"),
+    (re.compile(r"""["']@azure-rest/ai-inference["']"""),
+     "Azure AI Inference", "high", "high"),
+    (re.compile(r"""["']@azure/ai-projects["']"""),
+     "Azure AI Projects", "high", "high"),
+    # LangChain JS ecosystem.
+    (re.compile(r"""["']langchain(?:/[\w/.\-]+)?["']"""),
+     "LangChain JS", "high", "high"),
+    (re.compile(r"""["']@langchain/core(?:/[\w/.\-]+)?["']"""),
+     "LangChain Core", "high", "high"),
+    (re.compile(r"""["']@langchain/openai(?:/[\w/.\-]+)?["']"""),
+     "LangChain OpenAI", "high", "high"),
+    (re.compile(r"""["']@langchain/anthropic(?:/[\w/.\-]+)?["']"""),
+     "LangChain Anthropic", "high", "high"),
+    (re.compile(r"""["']@langchain/community(?:/[\w/.\-]+)?["']"""),
+     "LangChain Community", "high", "high"),
+    (re.compile(r"""["']@langchain/langgraph(?:/[\w/.\-]+)?["']"""),
+     "LangGraph", "high", "high"),
+    (re.compile(r"""["']@langchain/google-(?:genai|vertexai)(?:/[\w/.\-]+)?["']"""),
+     "LangChain Google", "high", "high"),
+    (re.compile(r"""["']@langchain/(?:cohere|groq|mistralai|aws)(?:/[\w/.\-]+)?["']"""),
+     "LangChain provider integration", "high", "high"),
+    (re.compile(r"""["']@langchain/ollama(?:/[\w/.\-]+)?["']"""),
+     "LangChain Ollama", "medium", "high"),
+    # LlamaIndex JS ecosystem.
+    (re.compile(r"""["']llamaindex(?:/[\w/.\-]+)?["']"""),
+     "LlamaIndex JS", "high", "high"),
+    (re.compile(r"""["']@llamaindex/(?:core|cloud|openai|anthropic)(?:/[\w/.\-]+)?["']"""),
+     "LlamaIndex (sub-modules)", "high", "high"),
+    # Vercel AI SDK — bare 'ai' is too collision-prone; rely on sub-packages.
+    (re.compile(r"""["']ai/(?:react|rsc|svelte|vue|solid|core|prompts|test)["']"""),
+     "Vercel AI SDK", "high", "high"),
+    (re.compile(r"""["']@ai-sdk/(?:openai|openai-compatible)["']"""),
+     "Vercel AI SDK — OpenAI provider", "high", "high"),
+    (re.compile(r"""["']@ai-sdk/(?:anthropic|google|google-vertex|cohere|mistral|groq|together|fireworks|amazon-bedrock|azure|replicate|perplexity|deepseek|xai|cerebras|deepinfra|togetherai)["']"""),
+     "Vercel AI SDK — provider", "high", "high"),
+    # Mastra agent framework.
+    (re.compile(r"""["']@mastra/core(?:/[\w/.\-]+)?["']"""),
+     "Mastra", "high", "high"),
+    (re.compile(r"""["']@mastra/(?:loggers|memory|rag|engine|deployer|evals)(?:/[\w/.\-]+)?["']"""),
+     "Mastra (sub-modules)", "high", "high"),
+    # Observability / proxy clients.
+    (re.compile(r"""["']@helicone/(?:helicone|prompts|async)["']"""),
+     "Helicone", "high", "high"),
+    (re.compile(r"""["']langfuse(?:/[\w/.\-]+)?["']"""),
+     "Langfuse", "high", "high"),
+    (re.compile(r"""["']langfuse-langchain["']"""),
+     "Langfuse LangChain", "high", "high"),
+    (re.compile(r"""["']langfuse-vercel["']"""),
+     "Langfuse Vercel AI", "high", "high"),
+    (re.compile(r"""["']langsmith(?:/[\w/.\-]+)?["']"""),
+     "LangSmith", "high", "high"),
+    (re.compile(r"""["']portkey-ai(?:/[\w/.\-]+)?["']"""),
+     "Portkey", "high", "high"),
+    # Vector DB clients.
+    (re.compile(r"""["']@pinecone-database/pinecone["']"""),
+     "Pinecone", "high", "high"),
+    (re.compile(r"""["']weaviate-(?:ts-client|client)["']"""),
+     "Weaviate", "high", "high"),
+    (re.compile(r"""["']@qdrant/(?:js-client-rest|qdrant-js)["']"""),
+     "Qdrant", "high", "high"),
+    (re.compile(r"""["']chromadb["']"""),
+     "Chroma DB", "high", "high"),
+    (re.compile(r"""["']@zilliz/milvus2-sdk-node["']"""),
+     "Milvus / Zilliz", "high", "high"),
+    (re.compile(r"""["']@lancedb/lancedb["']"""),
+     "LanceDB", "high", "high"),
+    (re.compile(r"""["']vectordb["']"""),
+     "LanceDB (legacy)", "high", "high"),
+    (re.compile(r"""["']@turbopuffer/turbopuffer["']"""),
+     "TurboPuffer", "high", "high"),
+    # MCP (Model Context Protocol).
+    (re.compile(r"""["']@modelcontextprotocol/sdk(?:/[\w/.\-]+)?["']"""),
+     "MCP SDK", "high", "high"),
+    (re.compile(r"""["']@modelcontextprotocol/server-[\w\-]+["']"""),
+     "MCP Server (reference)", "high", "high"),
+    (re.compile(r"""["']@mcp-b/[\w\-]+["']"""),
+     "WebMCP (browser MCP)", "high", "high"),
+    # Ollama local-runtime client.
+    (re.compile(r"""["']ollama(?:/browser)?["']"""),
+     "Ollama", "medium", "high"),
+]
+
+# ``dangerouslyAllowBrowser: true`` and friends. Terser minification rewrites
+# ``true`` → ``!0`` and ``false`` → ``!1``, so both forms must be accepted.
+# The optional ``["']?`` around the property name handles three real cases:
+#   - JS object literal bareword:   ``{ dangerouslyAllowBrowser: true }``
+#   - JSON-serialised dehydration:  ``{"dangerouslyAllowBrowser":true}``
+#     (appears in __NEXT_DATA__, webpack runtime config blobs)
+#   - Quoted-key JS:                ``{"dangerouslyAllowBrowser": !0}``
+AI_BROWSER_FLAG_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    (re.compile(r"""["']?dangerouslyAllowBrowser["']?\s*:\s*(?:!0|true)"""),
+     "dangerouslyAllowBrowser", "critical", "high"),
+    (re.compile(r"""["']?dangerouslyAllowAPIKeyInBrowser["']?\s*:\s*(?:!0|true)"""),
+     "dangerouslyAllowAPIKeyInBrowser", "critical", "high"),
+    (re.compile(r"""["']?allowBrowser["']?\s*:\s*(?:!0|true)"""),
+     "allowBrowser (generic)", "high", "medium"),
+]
+
+# AI frontend product markers visible in shipped JS (chunks the http_probe
+# Wappalyzer pass cannot see because it only scans the initial HTML body).
+AI_FRONTEND_JS_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    (re.compile(r"WEBUI_(?:NAME|VERSION|AUTH|API_BASE_URL)"),
+     "Open WebUI", "medium", "high"),
+    (re.compile(r"window\.__WEBUI_APP__|window\.WEBUI_NAME"),
+     "Open WebUI", "medium", "high"),
+    (re.compile(r"LIBRECHAT_[\w\-]{0,30}"),
+     "LibreChat", "medium", "medium"),
+    (re.compile(r"AnythingLLM|workspaceSlug|workspace-slug"),
+     "AnythingLLM", "medium", "high"),
+    (re.compile(r"flowise|chatflowid|chatFlowDomain"),
+     "Flowise", "medium", "high"),
+    (re.compile(r"langflow|LangflowFlow|/api/v1/run/"),
+     "Langflow", "medium", "high"),
+    (re.compile(r"console\.dify\.ai|app[-_]token"),
+     "Dify", "medium", "medium"),
+    (re.compile(r"@lobehub/(?:ui|chat|icons|tts)"),
+     "LobeChat", "medium", "high"),
+    (re.compile(r"NextChat|ChatGPT-Next-Web|chatgpt_next_web"),
+     "NextChat", "medium", "high"),
+    (re.compile(r"BetterChatGPT|better-chatgpt"),
+     "BetterChatGPT", "medium", "high"),
+    (re.compile(r"SillyTavern|SillyTavernSettings"),
+     "SillyTavern", "high", "high"),
+    (re.compile(r"window\.gradio_config|__gradio_mode__|customElements\.define\(\s*[\"']gradio-app[\"']"),
+     "Gradio", "medium", "high"),
+    (re.compile(r"stApp|stStreamlitApp|_stcore|stWebsocket"),
+     "Streamlit", "medium", "high"),
+    (re.compile(r"@jupyter-ai/(?:core|chatui|magics)"),
+     "Jupyter-AI extension", "high", "high"),
+    (re.compile(r"comfy-splash-bg|ComfyUI|/api/(?:queue|prompt|object_info)\b"),
+     "ComfyUI", "medium", "high"),
+    (re.compile(r"txt2img_textarea|img2img_textarea|gradioApp\(\)|/sdapi/v1/"),
+     "AUTOMATIC1111 SD WebUI", "medium", "high"),
+    (re.compile(r"Fooocus|fooocus_version"),
+     "Fooocus", "medium", "high"),
+    (re.compile(r"InvokeAI|invokeai|/api/v[12]/(?:queue|models)"),
+     "InvokeAI", "medium", "high"),
+    (re.compile(r"PrivateGPT|privategpt"),
+     "PrivateGPT", "medium", "medium"),
+    (re.compile(r"@quivr|/api/(?:brains|chat)/[\w\-]+"),
+     "Quivr", "medium", "medium"),
+    (re.compile(r"@janhq/|janframework|jan\.ai"),
+     "Jan", "medium", "high"),
+    (re.compile(r"DanswerApp|danswer|onyx-ai"),
+     "Onyx / Danswer", "medium", "medium"),
+    (re.compile(r"chainlit|@chainlit/|cl-message-action"),
+     "Chainlit", "medium", "high"),
+]
+
+# Provider base URLs and proxy/gateway URLs. Lower severity individually
+# (a base URL alone is informational), but pair with an SDK-import or
+# key-literal hit to escalate.
+AI_PROVIDER_URL_PATTERNS: list[tuple[Pattern[str], str, str, str]] = [
+    (re.compile(r"https://api\.openai\.com/v\d+"),
+     "OpenAI API endpoint", "medium", "high"),
+    (re.compile(r"https://api\.anthropic\.com/v\d+"),
+     "Anthropic API endpoint", "medium", "high"),
+    (re.compile(r"https://api\.cohere\.(?:com|ai)/v\d+"),
+     "Cohere API endpoint", "medium", "high"),
+    (re.compile(r"https://generativelanguage\.googleapis\.com/v\d+(?:beta)?"),
+     "Google Gemini API endpoint", "medium", "high"),
+    (re.compile(r"https://[a-z\-]+-aiplatform\.googleapis\.com"),
+     "Google Vertex AI endpoint", "medium", "high"),
+    (re.compile(r"https://api-inference\.huggingface\.co"),
+     "HuggingFace Inference API", "medium", "high"),
+    (re.compile(r"https://api\.replicate\.com/v\d+"),
+     "Replicate API", "medium", "high"),
+    (re.compile(r"https://api\.groq\.com/openai/v\d+"),
+     "Groq API", "medium", "high"),
+    (re.compile(r"https://api\.together\.(?:xyz|ai)/v\d+"),
+     "Together AI API", "medium", "high"),
+    (re.compile(r"https://api\.deepseek\.com/v\d+"),
+     "DeepSeek API", "medium", "high"),
+    (re.compile(r"https://api\.perplexity\.ai"),
+     "Perplexity API", "medium", "high"),
+    (re.compile(r"https://api\.fireworks\.ai/inference/v\d+"),
+     "Fireworks AI API", "medium", "high"),
+    (re.compile(r"https://api\.mistral\.ai/v\d+"),
+     "Mistral API", "medium", "high"),
+    (re.compile(r"https://api\.x\.ai/v\d+"),
+     "xAI Grok API", "medium", "high"),
+    (re.compile(r"https://openrouter\.ai/api/v\d+"),
+     "OpenRouter API", "medium", "high"),
+    (re.compile(r"https://[a-z0-9\-]*bedrock-runtime\.[a-z0-9\-]+\.amazonaws\.com"),
+     "AWS Bedrock Runtime endpoint", "high", "high"),
+    (re.compile(r"https://[a-z0-9\-]+\.openai\.azure\.com"),
+     "Azure OpenAI endpoint", "medium", "high"),
+    # Proxy / gateway URLs.
+    (re.compile(r"https://(?:oai|anthropic|gateway|ai-gateway)\.helicone\.ai"),
+     "Helicone proxy", "medium", "high"),
+    (re.compile(r"https://api\.portkey\.ai/v\d+"),
+     "Portkey Gateway", "medium", "high"),
+    (re.compile(r"https://gateway\.ai\.cloudflare\.com/v\d+/[a-f0-9\-]+/[\w\-]+"),
+     "Cloudflare AI Gateway", "medium", "high"),
+    (re.compile(r"https://(?:cloud\.)?langfuse\.com|https://us\.cloud\.langfuse\.com"),
+     "Langfuse Cloud", "medium", "high"),
+    (re.compile(r"https://api\.smith\.langchain\.com"),
+     "LangSmith API", "medium", "high"),
+]
+
+# Context tokens used to disambiguate the ``AIzaSy*`` Google key format
+# (collides with Maps / Firebase / YouTube Data API keys). When any of these
+# appear within ±2KB of the key match, escalate to a Gemini-specific finding.
+_GEMINI_CONTEXT_TOKENS: tuple[str, ...] = (
+    "@google/genai",
+    "@google/generative-ai",
+    "GoogleGenerativeAI",
+    "GoogleGenAI",
+    "generativelanguage.googleapis.com",
+    "gemini-1.5",
+    "gemini-2",
+    "x-goog-api-key",
+)
+
+# Legacy export kept for forward-compat with old import statements. The
+# populated catalogue is split into the four families above for clarity.
+AI_SDK_IMPORT_REGEX: list[tuple[Pattern[str], str, str]] = [
+    (pat, sdk, "ai-sdk-client") for pat, sdk, _sev, _conf in AI_SDK_IMPORT_PATTERNS
+]
 
 # subdomain_takeover — AI provider CNAMEs
 AI_TAKEOVER_PROVIDERS: dict[str, str] = {}
@@ -781,6 +1267,163 @@ def is_ai_prompt_param(name: str) -> bool:
     if not name:
         return False
     return name.strip().lower() in AI_PARAM_NAMES
+
+
+# ---------------------------------------------------------------------------
+# js_recon helpers
+# ---------------------------------------------------------------------------
+
+def _redact_secret(value: str) -> str:
+    """Return a safe-to-store rendering of an API key for graph storage.
+
+    Shows the first 6 and last 4 characters, masking the middle. Avoids
+    persisting the full credential while still letting an operator confirm
+    which key matched. Short strings (<14 chars) are masked entirely.
+    """
+    if not value:
+        return ""
+    if len(value) < 14:
+        return "*" * len(value)
+    return f"{value[:6]}...{value[-4:]}"
+
+
+def _disambiguate_google_key(
+    content: str, span: tuple[int, int]
+) -> tuple[str, str, str]:
+    """Return ``(sdk_name, severity, confidence)`` for an ``AIzaSy*`` match.
+
+    Scans ±2KB around the match span for Gemini-specific tokens. When any
+    are present, the key is a Gemini credential (critical). Otherwise it's
+    almost certainly a Maps / Firebase / YouTube key — keep the finding but
+    downgrade severity so operators don't chase a false positive.
+    """
+    start, end = span
+    window_start = max(0, start - 2048)
+    window_end = min(len(content), end + 2048)
+    context = content[window_start:window_end]
+    for token in _GEMINI_CONTEXT_TOKENS:
+        if token in context:
+            return ("Google Gemini API Key", "critical", "high")
+    return ("Google API Key (likely Maps/Firebase)", "medium", "low")
+
+
+def match_ai_sdk(content: str, max_bytes: int = 524288) -> list[dict]:
+    """Scan a JS blob for AI/LLM signals across four channels.
+
+    Returns a list of finding dicts with the shape::
+
+        {
+            "category":       "ai-sdk-client" | "ai-sdk-key-literal"
+                              | "ai-sdk-browser-allowed" | "ai-frontend-detected"
+                              | "ai-provider-url",
+            "sdk_name":       "OpenAI" / "Anthropic" / "Open WebUI" / ...,
+            "severity":       "info" | "low" | "medium" | "high" | "critical",
+            "confidence":     "low" | "medium" | "high",
+            "matched_text":   the full matched substring (kept for evidence),
+            "sample":         redacted rendering of captured key, "" otherwise,
+            "byte_offset":    start index of the match in the content,
+            "detection_method": "ai_sdk_catalogue",
+        }
+
+    Constructor-context key matches suppress overlapping prefix-anchored
+    matches on the same byte range, so a ``new OpenAI({apiKey:'sk-...'})``
+    yields a single high-confidence finding instead of two duplicates.
+
+    The ``AIzaSy`` Google-key disambiguation rule runs post-match: the helper
+    scans ±2KB around each Google key for Gemini SDK / endpoint tokens and
+    only flags as Gemini when at least one is present.
+
+    Bodies larger than ``max_bytes`` (default 512KB) are truncated before
+    scanning. JS bundles past this size are typically minified vendor blobs
+    that have already been catalogued upstream.
+    """
+    if not content:
+        return []
+    if len(content) > max_bytes:
+        content = content[:max_bytes]
+
+    findings: list[dict] = []
+    claimed_ranges: list[tuple[int, int]] = []
+
+    def _record(category: str, sdk_name: str, severity: str, confidence: str,
+                match: re.Match, *, captured_value: str = "") -> None:
+        span = match.span()
+        # Suppress prefix-anchored hits that overlap a constructor-context
+        # match already recorded for the same span.
+        for c_start, c_end in claimed_ranges:
+            if span[0] >= c_start and span[1] <= c_end:
+                return
+        findings.append({
+            "category": category,
+            "sdk_name": sdk_name,
+            "severity": severity,
+            "confidence": confidence,
+            "matched_text": match.group(0)[:500],
+            # Full captured secret kept here so callers can dedup against the
+            # existing Secret taxonomy. NOT persisted as-is — the mixin uses
+            # this as a Cypher needle but stores only the redacted ``sample``.
+            "captured_value": captured_value,
+            "sample": _redact_secret(captured_value) if captured_value else "",
+            "byte_offset": span[0],
+            "detection_method": "ai_sdk_catalogue",
+        })
+
+    # 1) Constructor-context key literals run FIRST so they win priority over
+    #    the prefix-anchored fallback patterns below.
+    for pattern, sdk_name, severity, confidence in AI_KEY_CONSTRUCTOR_PATTERNS:
+        for match in pattern.finditer(content):
+            captured = match.group(1) if match.groups() else match.group(0)
+            _record("ai-sdk-key-literal", sdk_name, severity, confidence,
+                    match, captured_value=captured)
+            claimed_ranges.append(match.span())
+
+    # 2) Prefix-anchored key literals (Google key gets disambiguated).
+    for pattern, sdk_name, severity, confidence in AI_KEY_PREFIX_PATTERNS:
+        for match in pattern.finditer(content):
+            if "AIzaSy" in pattern.pattern:
+                resolved_sdk, resolved_sev, resolved_conf = (
+                    _disambiguate_google_key(content, match.span())
+                )
+                _record("ai-sdk-key-literal", resolved_sdk, resolved_sev,
+                        resolved_conf, match, captured_value=match.group(0))
+            else:
+                _record("ai-sdk-key-literal", sdk_name, severity, confidence,
+                        match, captured_value=match.group(0))
+
+    # 3) SDK imports.
+    for pattern, sdk_name, severity, confidence in AI_SDK_IMPORT_PATTERNS:
+        for match in pattern.finditer(content):
+            _record("ai-sdk-client", sdk_name, severity, confidence, match)
+
+    # 4) Browser-mode opt-in flags.
+    for pattern, flag_name, severity, confidence in AI_BROWSER_FLAG_PATTERNS:
+        for match in pattern.finditer(content):
+            _record("ai-sdk-browser-allowed", flag_name, severity, confidence,
+                    match)
+
+    # 5) Frontend product markers in shipped JS.
+    seen_products: set[str] = set()
+    for pattern, product, severity, confidence in AI_FRONTEND_JS_PATTERNS:
+        for match in pattern.finditer(content):
+            # One frontend finding per product per file — markers cluster.
+            if product in seen_products:
+                continue
+            seen_products.add(product)
+            _record("ai-frontend-detected", product, severity, confidence,
+                    match)
+            break
+
+    # 6) Provider base URLs / proxy URLs (contextual signals).
+    seen_urls: set[str] = set()
+    for pattern, label, severity, confidence in AI_PROVIDER_URL_PATTERNS:
+        for match in pattern.finditer(content):
+            if label in seen_urls:
+                continue
+            seen_urls.add(label)
+            _record("ai-provider-url", label, severity, confidence, match)
+            break
+
+    return findings
 
 
 def resolve_ai_tool_arg_path(spec: dict, dialect: str, param_name: str) -> str | None:

@@ -145,6 +145,14 @@ DEFAULT_AGENT_SETTINGS: dict[str, Any] = {
     'PRODUCTIVITY_AUDIT_WINDOW': 6,         # how many recent steps the audit considers
     'UNPRODUCTIVE_STREAK_THRESHOLD': 3,     # unproductive steps in window to trigger pivot
 
+    # Response-uniformity anomaly detector: complements the productivity audit
+    # by catching streaks of DIFFERENT payloads that return IDENTICAL short-
+    # duration failures (signature of probes being rejected at parse time
+    # before reaching the layer the agent thinks it's testing).
+    'UNIFORM_RESPONSE_WINDOW': 8,           # how many recent steps to consider
+    'UNIFORM_RESPONSE_MIN_COUNT': 5,        # min identical-signature steps to fire
+    'UNIFORM_RESPONSE_DURATION_MS': 50,     # below this ms, response is "front-door fast"
+
     # Debug
     'CREATE_GRAPH_IMAGE_ON_INIT': False,
 

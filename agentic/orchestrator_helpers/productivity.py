@@ -176,6 +176,133 @@ def downgrade_verdict_to_no_progress(productivity: dict, reason: str) -> dict:
     return out
 
 
+def detect_uniform_response_anomaly(
+    execution_trace: list,
+    *,
+    window: int = 8,
+    min_count: int = 5,
+    size_tolerance: int = 32,
+    duration_threshold_ms: int = 50,
+) -> Optional[str]:
+    """Detect a 'uniform response cliff' — a streak of recent tool calls whose
+    outputs share the same error_class, a near-identical body size, AND all
+    completed in under `duration_threshold_ms`.
+
+    This is the diagnostic signature of input being rejected at parse time or
+    by an early guard clause, rather than being processed by the layer the
+    agent thinks it is testing. Twelve "500 Internal Server Error" responses
+    in 3ms each are NOT twelve failed SQLi tests — they are twelve probes
+    that never reached the SQL layer at all.
+
+    Returns a multi-paragraph warning string when the pattern is detected,
+    else None. The orchestrator injects the warning into the next prompt so
+    the LLM re-examines whether its probes ever reached the target component
+    instead of marking the vector class 'tested' on the basis of uniform
+    front-door rejections.
+
+    Args:
+        execution_trace:        full execution_trace list from state
+        window:                 how many recent steps to consider
+        min_count:              minimum repeats of the same signature to fire
+        size_tolerance:         bucket size (bytes) for grouping near-equal sizes
+        duration_threshold_ms:  steps slower than this are NOT uniform-fast
+    """
+    if not execution_trace or len(execution_trace) < min_count:
+        return None
+
+    recent = execution_trace[-window:]
+    if len(recent) < min_count:
+        return None
+
+    # Signature = (error_class, size_bucket). Steps missing error_class
+    # contribute a "_legacy" bucket that will never reach min_count on its
+    # own — backward compatible with traces from before this feature shipped.
+    from collections import Counter
+
+    signatures: list[tuple] = []
+    durations: list[int] = []
+    for step in recent:
+        ec = step.get("error_class")
+        if not ec:
+            ec = "success" if step.get("success", True) else "_legacy"
+        size = len(step.get("tool_output") or "")
+        size_bucket = size // max(size_tolerance, 1)
+        signatures.append((ec, size_bucket))
+        durations.append(int(step.get("duration_ms") or 0))
+
+    sig_counts = Counter(signatures)
+    top_sig, top_count = sig_counts.most_common(1)[0]
+    if top_count < min_count:
+        return None
+
+    # The signature must represent something the LLM might mis-classify as
+    # 'vector tested'. Successes don't qualify (a streak of 200s is normal
+    # baseline behavior, not a parse-time-crash signal).
+    top_ec, top_size_bucket = top_sig
+    if top_ec in ("success", "_legacy"):
+        return None
+
+    matching_indices = [i for i, s in enumerate(signatures) if s == top_sig]
+    matching_durations = [durations[i] for i in matching_indices]
+    # All matching durations must be fast. A single 200ms call breaks the
+    # "rejected at the door" signal — the request reached SOMETHING.
+    fast_mask = [d > 0 and d < duration_threshold_ms for d in matching_durations]
+    if not all(fast_mask):
+        return None
+
+    approx_size = top_size_bucket * size_tolerance
+    avg_dur = sum(matching_durations) / max(len(matching_durations), 1)
+
+    # Per-class remediation hints. The error_class already tells the LLM
+    # what kind of failure it is; this section translates that into action.
+    remediation_hint = {
+        "shell_parser_error":
+            "Switch tool: prefer `execute_code` with Python `requests` (no shell escaping) "
+            "over `execute_curl` with bash-escaped JSON. Your payloads are dying in bash, "
+            "not on the wire.",
+        "transport_error":
+            "Re-verify reachability: the target hostname/IP may have rotated, the network "
+            "alias may have been disconnected, or a previous tool tore down the route. "
+            "Run a single baseline GET / before resuming probes.",
+        "tool_internal_error":
+            "The tool wrapper itself is failing — check the tool args shape and any "
+            "file-path / @file references. The request likely never left the harness.",
+        "application_5xx_fast":
+            "All probes are 5xx in <50ms — the application is crashing at parse time or "
+            "in an early guard clause, BEFORE the layer you intend to test (e.g. SQL, "
+            "templating, auth). Your input is not being exercised the way you think. "
+            "Re-examine: (a) Is the JSON shape valid for the framework? (b) Is the "
+            "Content-Type correct? (c) Try a deliberately VALID body once to see what "
+            "a 'normal' processed response looks like, then compare. (d) Consider that "
+            "the vector class you're testing may not even be reachable with your current "
+            "payload structure.",
+        "application_4xx":
+            "Uniform 4xx — the server is rejecting these requests semantically. The "
+            "endpoint may not accept this method, content-type, or auth shape. This is "
+            "a legitimate signal — the layer is reachable, it just disagrees with the "
+            "request envelope, not the payload content.",
+        "application_5xx_normal":
+            "Uniform 5xx with normal latency — the application is reaching a consistent "
+            "crash point. This may be a real exploitable signal (e.g. type confusion, "
+            "panic on malformed input) — capture the exact crash signature and pivot to "
+            "extracting information from the error.",
+    }.get(top_ec, "Re-examine whether the probe actually exercises the layer under test.")
+
+    return (
+        f"## RESPONSE-UNIFORMITY ANOMALY\n\n"
+        f"Of your last {len(recent)} tool calls, {top_count} share an identical response shape:\n"
+        f"  - classification: `{top_ec}`\n"
+        f"  - response size:  ~{approx_size} bytes (bucket {top_size_bucket}, ±{size_tolerance}B)\n"
+        f"  - duration:       all <{duration_threshold_ms}ms (avg {avg_dur:.0f}ms)\n\n"
+        f"Same status + same size + sub-50ms latency across {top_count} probes is NOT "
+        f"a 'this vector is blocked' signal. It means every probe is being short-circuited "
+        f"uniformly — your input is not being processed by the layer you think you're testing.\n\n"
+        f"**What to do:** {remediation_hint}\n\n"
+        f"**Do NOT mark the current vector class 'tested' on the basis of these responses.** "
+        f"The test result is INCONCLUSIVE, not NEGATIVE.\n"
+    )
+
+
 def build_productivity_audit_section(
     execution_trace: list,
     current_tool_name: Optional[str] = None,

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.12.0] - 2026-05-24
+
+### Added
+
+- **Per-step diagnostic classification** ([agentic/orchestrator_helpers/error_class.py](agentic/orchestrator_helpers/error_class.py), [execute_plan_node.py](agentic/orchestrator_helpers/nodes/execute_plan_node.py), [execute_tool_node.py](agentic/orchestrator_helpers/nodes/execute_tool_node.py)) — every tool step is tagged with one of seven `error_class` values: `success`, `shell_parser_error`, `transport_error`, `tool_internal_error`, `application_4xx`, `application_5xx_fast` (<50ms — parse-time crash, input never reached business logic), `application_5xx_normal` (≥50ms — real app/DB error). The fast-vs-normal 5xx split is the key diagnostic that prevents the LLM from treating "all SQL payloads return 500" as "vector exhausted" when the input was actually rejected at the parser.
+
+- **Inline `[duration_ms, error_class]` annotations in chain context** ([agentic/state.py](agentic/state.py)) — `_format_step_diagnostics()` surfaces both fields next to every tool entry the LLM reads, e.g. `execute_curl [3ms, application_5xx_fast]: ...`. Renders cleanly across the three chain-context paths (single-tool, wave, older-iteration digest); legacy steps without the fields render empty (backward-compatible).
+
+- **Response-uniformity anomaly detector** ([agentic/orchestrator_helpers/productivity.py](agentic/orchestrator_helpers/productivity.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — complementary to the existing same-pattern fingerprint audit. When 5+ of the last 8 steps share the same `(error_class, body_size_bucket)` AND all complete in under 50ms, a warning block is injected into the next prompt: *"the test result is INCONCLUSIVE, not NEGATIVE — do not mark this vector class tested."* Each `error_class` carries its own remediation hint (shell-quoting streaks recommend `execute_code` over `execute_curl`; fast-5xx streaks recommend re-examining payload validity before pivoting). Tunable via `UNIFORM_RESPONSE_WINDOW` / `UNIFORM_RESPONSE_MIN_COUNT` / `UNIFORM_RESPONSE_DURATION_MS`.
+
+- **Competing-hypotheses requirement in Deep Think** ([agentic/state.py](agentic/state.py), [agentic/prompts/base.py](agentic/prompts/base.py), [agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — `DeepThinkResult` gains a `competing_hypotheses: List[CompetingHypothesis]` field where each hypothesis carries `hypothesis`, `supporting_evidence` (cite specific iters/steps), and `disambiguating_probe` (ONE concrete test that distinguishes from the alternatives). The prompt requires ≥2 hypotheses when the trigger is "Unproductive streak detected" or when any chain finding has confidence ≥60. The rendered block leads the next iteration's prompt with the imperative *"do not just confirm your favorite"* — pushing the agent toward disambiguating probes instead of confirming its first plausible inference. Anti-confirmation-bias mechanism for the strategic re-evaluation loop.
+
+- **Adversarial AI Phase 6 — JS Recon AI SDK detection** ([recon/helpers/ai_signal_catalog.py](recon/helpers/ai_signal_catalog.py), [recon/main_recon_modules/js_recon.py](recon/main_recon_modules/js_recon.py), [graph_db/mixins/recon/js_recon_mixin.py](graph_db/mixins/recon/js_recon_mixin.py)) — new 7th js_recon analysis pass scans every JS bundle for AI/LLM signals using a 164-pattern catalogue (65 SDK imports, 33+18 key literals, 3 browser flags, 23 frontend markers, 22 provider URLs). Writes `JsReconFinding` with 5 new `finding_type` values: `ai-sdk-client`, `ai-sdk-key-literal`, `ai-sdk-browser-allowed`, `ai-frontend-detected`, `ai-provider-url`. Constructor-context patterns suppress overlapping prefix matches (single finding per leaked key). Gemini disambiguation rule: `AIzaSy*` keys escalate to critical when paired with `@google/genai` / Gemini SDK / endpoint within ±2KB, otherwise downgrade to medium with "Maps/Firebase" label. Mixin enriches matching `Secret` nodes with `ai_provider` + `ai_finding_id`, gated on an AI-key-prefix whitelist so Stripe/Slack/AWS literals are never wrongly enriched. Gated by `jsReconAiSdkDetectionEnabled` (default on). 64 new unit/integration/smoke tests + 23 fixture JS files in [guinea_pigs/ai_surface_target/](guinea_pigs/ai_surface_target/) on port 9104 covering every detection branch including negative regression cases (jQuery, Stripe-only). Wiki: [Adversarial AI Recon § JS Recon AI SDK Detection](redamon.wiki/Adversarial-AI-Recon.md#js-recon-ai-sdk-detection).
+
+### Fixed
+
+- **Plan-wave path dropped diagnostic fields** ([agentic/orchestrator_helpers/nodes/think_node.py](agentic/orchestrator_helpers/nodes/think_node.py)) — when `execute_plan_node` populated `duration_ms` and `error_class` on each wave step, `think_node` then rebuilt each step into a fresh `exec_step` dict that copied only a hand-picked field subset, silently dropping the two diagnostic fields before they reached the execution trace. P1/P2/P3 annotations never appeared for plan-wave iterations (~90% of the agent's traffic). Now propagated explicitly; wiring guard test (`test_think_node_plan_wave_propagates_diagnostics`) catches future regression.
+
+### Docs
+
+- **AI-Agent-Guide.md** ([redamon.wiki/AI-Agent-Guide.md](redamon.wiki/AI-Agent-Guide.md)) — "Deep Think Cards" section updated: trigger #3 rewritten from "3 consecutive failures" to the actual productivity-verdict-based sliding-window detection; output table grew from 5 to 6 sections with the new Competing Hypotheses row; new subsections on diagnostic annotations and the response-uniformity anomaly detector.
+
+- **README.AGENTIC_SYSTEM.md** ([readmes/README.AGENTIC_SYSTEM.md](readmes/README.AGENTIC_SYSTEM.md)) — `DeepThinkResult` schema documentation refreshed with the new `competing_hypotheses` field and rendered-markdown example; "Diagnostic Annotations" and "Response-Uniformity Anomaly Detector" subsections added to the Productivity chapter; executive-summary entries #13 and #21 updated.
+
+
+---
+
+
 ## [4.11.0] - 2026-05-23
 
 ### Added
