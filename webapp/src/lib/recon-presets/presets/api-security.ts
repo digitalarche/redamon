@@ -160,6 +160,7 @@ Pentesters and security engineers testing REST APIs, GraphQL endpoints, or micro
     // --- DISABLE JS Recon (jsluice covers endpoint extraction) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- ffuf: API-specific extensions, smart fuzz ---
     ffufEnabled: true,
     ffufThreads: 40,

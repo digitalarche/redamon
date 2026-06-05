@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v4.14.1-release-2E8B57?style=flat" alt="Version 4.14.1"/>
+  <img height="24" src="https://img.shields.io/badge/v4.15.0-release-2E8B57?style=flat" alt="Version 4.15.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -31,9 +31,9 @@
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
   <img height="24" src="https://img.shields.io/badge/Docker-Compose-1A7EC2?style=flat&logo=docker&logoColor=white" alt="Docker"/>
   <img height="24" src="https://img.shields.io/badge/IP%2FCIDR-TARGETING-0D7377?style=flat" alt="IP/CIDR Targeting"/>
-  <img height="24" src="https://img.shields.io/badge/70+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="70+ Security Tools"/>
+  <img height="24" src="https://img.shields.io/badge/100+-SECURITY%20TOOLS-CC8F00?style=flat&logo=hack-the-box&logoColor=white" alt="100+ Security Tools"/>
   <img height="24" src="https://img.shields.io/badge/185,000+-DETECTION%20RULES-8B1142?style=flat" alt="185,000+ Detection Rules"/>
-  <img height="24" src="https://img.shields.io/badge/266+-PROJECT%20SETTINGS-00899B?style=flat" alt="266+ Settings"/>
+  <img height="24" src="https://img.shields.io/badge/500+-PROJECT%20SETTINGS-00899B?style=flat" alt="500+ Settings"/>
   <img height="24" src="https://img.shields.io/badge/400+-AI%20MODELS-04A878?style=flat&logo=huggingface&logoColor=white" alt="400+ AI Models"/>
   <img height="24" src="https://img.shields.io/badge/%F0%9F%96%A5%EF%B8%8F_LOCAL%20MODELS-OLLAMA%20%7C%20vLLM%20%7C%20LM%20Studio-B85C00?style=flat" alt="Local Models Support"/>
   <img height="24" src="https://img.shields.io/badge/Metasploit-Framework-1A6DAA?style=flat" alt="Metasploit Framework"/>
@@ -388,7 +388,7 @@ The platform is built around six pillars:
 | **Attack Surface Graph** | A Neo4j knowledge graph with 17 node types and 20+ relationship types that serves as the single source of truth for every finding, and the primary data source the AI agent queries before every decision. |
 | **EvoGraph** | A persistent, evolutionary attack chain graph in Neo4j that tracks every step, finding, decision, and failure across the attack lifecycle, bridging the recon graph and enabling cross-session intelligence accumulation. |
 | **CypherFix** | Automated vulnerability remediation pipeline: an AI triage agent correlates and prioritizes findings from the graph, then a CodeFix agent clones the target repository, implements fixes using a ReAct loop with 11 code tools, and opens a GitHub pull request. |
-| **Project Settings Engine** | 266+ per-project parameters (exposed through the webapp UI) that control every tool's behavior, from Naabu thread counts to Nuclei severity filters to agent approval gates. |
+| **Project Settings Engine** | 500+ per-project parameters (exposed through the webapp UI) that control every tool's behavior, from Naabu thread counts to Nuclei severity filters to agent approval gates. |
 
 ---
 
@@ -396,7 +396,7 @@ The platform is built around six pillars:
 
 ### Reconnaissance Pipeline
 
-A fully automated, end-to-end **external attack-surface mapper** running inside a Kali Linux container. Give it one input (a root domain, a subdomain list, or IP/CIDR ranges) and the pipeline returns a complete, structured picture of the target: every subdomain, every live host, every open port, every HTTP service with its technology stack, every crawled endpoint and discovered parameter, every CVE the target is likely vulnerable to, plus dedicated scanners for **GraphQL APIs**, **subdomain takeovers**, **hidden virtual hosts** behind reverse proxies, and an **Adversarial AI Surface** layer that tags AI runtimes / vector DBs / LLM frontends / proxies / MCP servers / chat / completion / embedding / RAG endpoints and prompt-injectable parameters using header / favicon / title / path / parameter-name signatures.
+A fully automated, end-to-end **external attack-surface mapper** running inside a Kali Linux container. Give it one input (a root domain, a subdomain list, or IP/CIDR ranges) and the pipeline returns a complete, structured picture of the target: every subdomain, every live host, every open port, every HTTP service with its technology stack, every crawled endpoint and discovered parameter, every CVE the target is likely vulnerable to, plus dedicated scanners for **GraphQL APIs**, **subdomain takeovers**, **hidden virtual hosts** behind reverse proxies, and an **Adversarial AI Surface** layer that tags AI runtimes / vector DBs / LLM frontends / proxies / MCP servers / chat / completion / embedding / RAG endpoints and prompt-injectable parameters using header / favicon / title / path / parameter-name signatures, then **actively confirms** them with a dedicated **AI Surface Recon** module (benign chat-shape probes, MCP handshake + tool-poisoning scan, vector-DB reads — no LLM calls).
 
 Everything runs on a **fan-out / fan-in** architecture: each phase fires as many tools in parallel as the work allows, then converges before the next phase begins. **40+ industry tools** integrate into one coordinated workflow, wildcard DNS poisoning is filtered out automatically with puredns, and **stealth mode** keeps the entire pipeline running on passive sources only when active probing is off-limits. Findings stream into the **Neo4j knowledge graph** on a background thread so the scan never blocks on database writes, and the raw JSON is preserved for download. The detailed tool-by-tool breakdown is in the matrix below.
 
@@ -438,6 +438,7 @@ Everything runs on a **fan-out / fan-in** architecture: each phase fires as many
 | | **Endpoint Extraction** | REST, GraphQL, WebSocket, router patterns | Passive | Per JS file |
 | | **Framework Fingerprinting** | 12 built-in + custom signatures | Passive | Per JS file |
 | | **DOM Sink Detection** | 17 XSS/prototype pollution patterns | Passive | Per JS file |
+| **AI Surface Recon** | **AI/LLM/MCP/Vector-DB Fingerprinting** | Active confirmation of the surfaces the classifier flagged — chat-shape probes (dialect/streaming/latency), MCP handshake + `tools/list` + Cisco YARA tool-poisoning scan, OpenAPI/model-listing discovery, Julius YAML probe-pack engine, vector-DB confirmation reads (qdrant/chroma/weaviate/milvus). Writes `Endpoint.ai_*` / `ai_mcp_*`, `Parameter.is_ai_prompt_injectable`, confirmed `Technology(ai-*)`, and MCP tool-poisoning `Vulnerability` nodes | Active (benign, no LLM calls) | Hosts parallel, workloads sequential (GROUP 5c / Phase 4.5) |
 | **Vulnerability Scanning** | **Vulnerability Scanning** | Nuclei (9,000+ templates + DAST + custom template upload) | Active | Parallel with GraphQL Scan + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
 | **GraphQL Security** | **GraphQL Security Testing** | Endpoint discovery, introspection test, schema extraction, sensitive-field detection, graphql-cop (12 misconfig checks: alias/batch/directive DoS, GraphiQL, trace mode, GET/POST CSRF, field suggestions) | Active / Passive | Parallel with Nuclei + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
 | **Subdomain Takeover** | **Subdomain Takeover Detection** | Subjack (Apache-2.0 DNS-first fingerprints) + Nuclei takeover templates (`http/takeovers/` + `dns/`) + BadDNS (AGPL-3.0 isolated sidecar: CNAME, NS, MX, TXT, SPF, DMARC, wildcard, NSEC, references, zonetransfer). Cross-tool dedup, 12+ auto-exploitable providers, confidence-scored `confirmed` / `likely` / `manual_review` verdicts | Active / Passive | Parallel with Nuclei + GraphQL Scan + VHost & SNI (GROUP 6 Phase A) |
@@ -631,7 +632,7 @@ Scans GitHub repositories for leaked credentials using **700+ detectors** with a
 
 ### Project Settings
 
-**266+ configurable parameters** across 16 tabs controlling every tool's behavior, from scan modules to agent approval gates. Managed through the webapp UI.
+**500+ configurable parameters** across 16 tabs controlling every tool's behavior, from scan modules to agent approval gates. Managed through the webapp UI.
 
 > **[Wiki: Project Settings Reference](https://github.com/samugit83/redamon/wiki/Project-Settings-Reference)**
 

@@ -22,6 +22,10 @@ model User {
   tradecraftResources UserTradecraftResource[]
   settings        UserSettings?
   uiPreferences Json              @default("{}") @map("ui_preferences")
+  // Per-user remembered model choices, used to pre-fill new projects.
+  // Null until the user creates their first project and picks models.
+  defaultAgentModel      String?  @map("default_agent_model")
+  defaultAiPipelineModel String?  @map("default_ai_pipeline_model")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @updatedAt @map("updated_at")
 
@@ -417,6 +421,23 @@ model Project {
   resourceEnumAiRagPathFlagEnabled        Boolean @default(true) @map("resource_enum_ai_rag_path_flag_enabled")
   resourceEnumAiParamInjectableFlagEnabled Boolean @default(true) @map("resource_enum_ai_param_injectable_flag_enabled")
   resourceEnumAiToolArgPathEnabled        Boolean @default(true) @map("resource_enum_ai_tool_arg_path_enabled")
+
+  // ========== AI SURFACE RECON (central module) ==========
+  aiSurfaceReconEnabled                   Boolean @default(true) @map("ai_surface_recon_enabled")
+  aiSurfaceReconTimeout                   Int     @default(10) @map("ai_surface_recon_timeout")
+  aiSurfaceReconMaxWorkers                Int     @default(5) @map("ai_surface_recon_max_workers")
+  aiSurfaceReconUserAgent                 String  @default("RedAmon-AISurfaceRecon/1.0") @map("ai_surface_recon_user_agent")
+  aiSurfaceReconChatShapeProbeEnabled     Boolean @default(true) @map("ai_surface_recon_chat_shape_probe_enabled")
+  aiSurfaceReconMcpHandshakeEnabled       Boolean @default(true) @map("ai_surface_recon_mcp_handshake_enabled")
+  aiSurfaceReconMcpListToolsEnabled       Boolean @default(true) @map("ai_surface_recon_mcp_list_tools_enabled")
+  aiSurfaceReconMcpYaraEnabled            Boolean @default(true) @map("ai_surface_recon_mcp_yara_enabled")
+  aiSurfaceReconOpenapiDiscoveryEnabled   Boolean @default(true) @map("ai_surface_recon_openapi_discovery_enabled")
+  aiSurfaceReconModelListEnabled          Boolean @default(true) @map("ai_surface_recon_model_list_enabled")
+  aiSurfaceReconVectorDbReadEnabled       Boolean @default(true) @map("ai_surface_recon_vector_db_read_enabled")
+  aiSurfaceReconJuliusProbePackEnabled    Boolean @default(true) @map("ai_surface_recon_julius_probe_pack_enabled")
+  aiSurfaceReconLatencyBaselineEnabled    Boolean @default(true) @map("ai_surface_recon_latency_baseline_enabled")
+  aiSurfaceReconCacheEnabled              Boolean @default(true) @map("ai_surface_recon_cache_enabled")
+  aiSurfaceReconProbePackVersion          String  @default("latest") @map("ai_surface_recon_probe_pack_version")
 
   // ========== KATANA WEB CRAWLER ==========
   katanaEnabled               Boolean  @default(true) @map("katana_enabled")

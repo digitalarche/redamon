@@ -91,6 +91,14 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('VhostSni')).toBe(true)
   })
 
+  test('contains EndpointAiClassifier', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('EndpointAiClassifier')).toBe(true)
+  })
+
+  test('contains AiSurfaceRecon', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('AiSurfaceRecon')).toBe(true)
+  })
+
   test('does not contain unsupported tools', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('GVM')).toBe(false)
   })
@@ -101,6 +109,11 @@ describe('PARTIAL_RECON_PHASE_MAP', () => {
   test('has SubdomainDiscovery phases', () => {
     expect(PARTIAL_RECON_PHASE_MAP['SubdomainDiscovery']).toHaveLength(1)
     expect(PARTIAL_RECON_PHASE_MAP['SubdomainDiscovery'][0]).toBe('Subdomain Discovery')
+  })
+
+  test('has AiSurfaceRecon phase', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['AiSurfaceRecon']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['AiSurfaceRecon'][0]).toBe('AI Surface Recon')
   })
 
   test('has Naabu phases', () => {

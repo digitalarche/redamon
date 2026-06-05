@@ -356,3 +356,91 @@ Build the e2e driver (separate artifact at `recon/tests/test_ai_e2e_against_guin
 6. Reports per-signal PASS/FAIL.
 
 The expected-results YAML is committed alongside this README and is the **contract** the driver tests against.
+
+---
+
+## Central `ai_surface_recon` module — live 100% validation
+
+The files above validate the **distributed** AI hooks via a full recon scan. The
+**central** `ai_surface_recon` module (active chat/MCP/OpenAPI/Julius/vector-DB
+probing) is validated by a self-contained harness that runs the module's real
+functions against real servers — no mocks. This closes the gaps unit tests
+cannot: live HTTP, the official `mcp` SDK handshake + `tools/list`, real YARA on
+real tool manifests, real `prance`/`jq` parsing, the real Julius matcher against
+the vendored packs, and the vector-DB confirmation read.
+
+Files:
+- [`ai_surface_recon_endpoints.py`](ai_surface_recon_endpoints.py) — stdlib HTTP
+  target: every chat shape (OpenAI / Anthropic / Ollama / Gemini / LangServe /
+  SSE), `/openapi.json` + `/.well-known/ai-plugin.json` + `/swagger.json`,
+  `/v1/models` + `/api/tags`, Julius signals (`GET /` "Ollama is running"),
+  Qdrant `/collections`, and the MCP `401`/version-mismatch branches.
+- [`mcp_poison_server.py`](mcp_poison_server.py) — a **real** MCP Streamable-HTTP
+  server (FastMCP) with a benign tool plus a tool-poisoning tool, a
+  data-exfiltration tool, and an annotation-mismatch tool, so the static YARA
+  analysis and heuristics have genuine targets.
+- [`validate_ai_surface_recon.py`](validate_ai_surface_recon.py) — the harness:
+  starts the HTTP target (+ Qdrant port 6333), launches the MCP server as a
+  subprocess, then exercises every workload and asserts. Exit 0 == 100%.
+
+Run it inside the recon image:
+
+```bash
+docker run --rm --entrypoint sh \
+  -v "$PWD/recon:/app/recon:ro" -v "$PWD/graph_db:/app/graph_db:ro" \
+  -v "$PWD/guinea_pigs:/app/guinea_pigs:ro" -w /app redamon-recon:latest -c '
+  pip install -q pyyaml yara-python jq prance "openapi-spec-validator>=0.7.1,<0.8" "mcp>=1.27" uvicorn &&
+  python3 guinea_pigs/ai_surface_target/validate_ai_surface_recon.py'
+```
+
+(The `pip install` is only needed until the recon image is rebuilt with the new
+`recon/requirements.txt` deps; after `docker compose --profile tools build recon`
+the harness runs with no install step.)
+
+Current status: **36/36 checks pass** — every chat family + streaming + latency,
+OpenAPI tools/vision/schema-ref/model-family, Julius service detection +
+specificity ranking, Qdrant read confirmation, the full MCP path (real SDK
+handshake, 4-tool enumeration, rug-pull hash, tool-poisoning + exfiltration +
+annotation-mismatch findings with OWASP-LLM/ATLAS mapping, auth-required and
+version-mismatch branches), and the integrated `run_ai_surface_recon` assembly.
+The only path not covered here is the Neo4j Cypher in the graph mixin (needs a
+live database); the harness validates everything up to the graph write.
+
+---
+
+## Full-scan coverage of the central `ai_surface_recon` module (ports 9106 + 9107)
+
+Earlier laps' showrooms only feed the *distributed* AI hooks (http_probe / port
+catalogue / resource_enum classifier / js_recon) — they serve no-op/banner
+responses, so the **central ai_surface_recon module's active probes would
+confirm nothing** against them. To make a full scan with the **AI / LLM Surface
+Recon** preset trigger every check end-to-end, the dockerized target now also
+runs the real central-module surfaces (started by [`run_target.py`](run_target.py)):
+
+- **Port 9106 — central AI surface** ([`make_ai_surface_recon_app`](server.py),
+  reusing the validated bodies in
+  [`ai_surface_recon_endpoints.py`](ai_surface_recon_endpoints.py)): real chat
+  shapes (OpenAI / Anthropic / Ollama / Gemini / LangServe / SSE), `/openapi.json`
+  + `/.well-known/ai-plugin.json` + `/v3/api-docs`, `/v1/models` + `/api/tags`,
+  and a Julius-matching `/` ("Ollama is running" + linked AI paths). Emits an
+  `x-vllm-version` header so http_probe flags it as an AI surface, which makes it
+  an ai_surface_recon candidate.
+- **Port 9107 — real MCP server** ([`mcp_poison_server.py`](mcp_poison_server.py),
+  FastMCP Streamable-HTTP): a benign tool plus a tool-poisoning, a
+  data-exfiltration, and an annotation-mismatch tool, so the MCP handshake,
+  `tools/list` enumeration, and static YARA analysis all fire. A discoverable
+  `x-mcp-version`-headed `GET /` makes it an ai_surface_recon candidate; the
+  protocol lives at `/mcp`.
+- **Port 6333 — Qdrant** (existing listener, now serves `/collections`): the
+  vector-DB confirmation read fires.
+
+So a full scan against this target with the AI preset triggers the complete
+chain: distributed AI hooks **and** the central module's chat-shape probes, MCP
+handshake + tool-poisoning, OpenAPI/manifest parsing, model-family guess, Julius
+fingerprint, and vector-DB confirmation.
+
+**Verified end-to-end (8/8):** running the real `ai_surface_recon` module
+against this target confirms 1 chat endpoint, 1 MCP server (4 tools, 3
+tool-poisoning findings), 1 vector DB, the model family, the OpenAPI tool-schema
+ref, and the Julius service. (`requirements.txt` now includes `mcp` + `uvicorn`
+for the MCP server; rebuild the image with `docker compose up -d --build`.)

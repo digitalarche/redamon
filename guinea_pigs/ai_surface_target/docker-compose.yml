@@ -19,11 +19,14 @@ services:
     restart: unless-stopped
     network_mode: host
     # Source bind for fast iteration during development. Comment out for
-    # frozen image runs. The CMD already points at /app/server.py inside
-    # the image, so the mount just overlays the source.
+    # frozen image runs. The CMD runs /app/run_target.py inside the image,
+    # so the mounts just overlay the source.
     volumes:
       - ./server.py:/app/server.py:ro
       - ./ai_signals.py:/app/ai_signals.py:ro
+      - ./ai_surface_recon_endpoints.py:/app/ai_surface_recon_endpoints.py:ro
+      - ./mcp_poison_server.py:/app/mcp_poison_server.py:ro
+      - ./run_target.py:/app/run_target.py:ro
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import socket,sys; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1', 11434)); s.close()\" || exit 1"]
       interval: 15s

@@ -638,6 +638,33 @@ const EndpointAiClassifier = (
   </div>
 )
 
+const AiSurfaceRecon = (
+  <div style={wrapperStyle}>
+    <div style={firstSectionTitleStyle}>How input is generated</div>
+    <p style={paraStyle}>
+      Runs after Resource Enumeration and probes only hosts that already show an AI signal. Candidates come from the graph: Endpoints tagged as LLM or MCP by the Endpoint AI Classifier, BaseURLs flagged with an AI framework during HTTP probing, and Services on known AI vector-database ports. When a flagged host has no classified chat path, a small fixed list of canonical chat paths is tried against it.
+    </p>
+    <ul style={listStyle}>
+      <li><strong>Chat endpoints</strong> are confirmed by sending a single 1-token request and reading the response shape.</li>
+      <li><strong>MCP servers</strong> are detected by the Model Context Protocol handshake, then their tools, resources and prompts are listed.</li>
+      <li><strong>API specs</strong> (OpenAPI / ai-plugin manifests) and model listings are fetched read-only to learn tool, vision, streaming support and the model family.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>How output transforms the graph</div>
+    <ul style={listStyle}>
+      <li><strong>Endpoint</strong> is enriched with confirmed AI properties: interface type, streaming / tools / vision support, model-family guess, measured latency, and for MCP servers the server name, version, protocol, capabilities and tool counts.</li>
+      <li><strong>Parameter</strong> nodes are created for each MCP tool argument and flagged when they look prompt-injectable.</li>
+      <li><strong>Technology</strong> nodes are confirmed for detected AI runtimes and vector databases.</li>
+      <li><strong>Vulnerability</strong> nodes are created for MCP tool poisoning, prompt injection and data-exfiltration hints found by static analysis, linked to the MCP Endpoint.</li>
+    </ul>
+
+    <div style={sectionTitleStyle}>When the scan refuses to start</div>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      When the graph contains no AI-tagged Endpoints and no AI-flagged hosts. There is nothing to probe until HTTP probing and the Endpoint AI Classifier have surfaced at least one AI signal.
+    </p>
+  </div>
+)
+
 // ============================================================================
 // VULNERABILITY / EXPLOITATION
 // ============================================================================
@@ -907,6 +934,7 @@ export const INPUT_LOGIC_TOOLTIPS: Record<string, ReactNode> = {
   JsRecon,
   Arjun,
   EndpointAiClassifier,
+  AiSurfaceRecon,
   // Vulnerability / exploitation
   Nuclei,
   GraphqlScan,

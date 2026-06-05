@@ -153,6 +153,7 @@ Pentesters and bug bounty hunters in the early recon phase who want a complete m
     // --- DISABLE JS Recon (jsluice is enough) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- ffuf: deep recursion + many extensions ---
     ffufEnabled: true,
     ffufThreads: 60,

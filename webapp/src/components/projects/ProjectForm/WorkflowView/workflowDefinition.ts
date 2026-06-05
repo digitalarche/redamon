@@ -44,6 +44,7 @@ export const WORKFLOW_TOOLS: WorkflowToolDef[] = [
 
   // Group 5.5 - JS Recon
   { id: 'JsRecon', label: 'JS Recon', enabledField: 'jsReconEnabled', group: 5.5, badge: 'both' },
+  { id: 'AiSurfaceRecon', label: 'AI Surface Recon', enabledField: 'aiSurfaceReconEnabled', group: 5.5, badge: 'active' },
 
   // Group 6 - Vulnerability Scanning
   { id: 'Nuclei',             label: 'Nuclei',             enabledField: 'nucleiEnabled',               group: 6, badge: 'active' },

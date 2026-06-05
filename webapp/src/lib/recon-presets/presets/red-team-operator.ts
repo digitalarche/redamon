@@ -167,6 +167,7 @@ Red team operators running authorized engagements where some active probing is a
     // --- DISABLE JS Recon ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
 

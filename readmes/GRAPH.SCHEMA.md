@@ -2897,14 +2897,47 @@ WHERE t.category = 'ai-vector-db' AND svc.project_id = $pid
 RETURN svc.port, t.name, svc.host
 ```
 
+### Property additions (central ai_surface_recon lap — active probing)
+
+Written by `recon/main_recon_modules/ai_surface_recon.py` (full pipeline,
+display Phase 4.5) and its partial-recon twin, via
+`update_graph_from_ai_surface_recon`. All COALESCE-merged. See
+[AI_SURFACE_RECON_MODULE.md](AI_SURFACE_RECON_MODULE.md) for the full module
+walkthrough (per-workload input/output nodes, settings, developer guide).
+
+| Node label | New property | Type | Meaning |
+|---|---|---|---|
+| `Endpoint` | `ai_supports_tools` | bool | tool-call schema present in a discovered OpenAPI / ai-plugin spec |
+| `Endpoint` | `ai_supports_vision` | bool | image content type present in spec |
+| `Endpoint` | `ai_supports_streaming` | bool | SSE confirmed by chat-shape probe **or** advertised by a discovered OpenAPI spec |
+| `Endpoint` | `ai_model_family_guess` | string (`gpt`/`claude`/`llama`/…) | from `/v1/models`, `/api/tags`, or Julius extract |
+| `Endpoint` | `ai_model_ids` | string[] (≤50) | deployed model ids from `/v1/models` + Julius extract (deduped) |
+| `Endpoint` | `ai_tool_schema_ref` | string (path) | cached OpenAPI/manifest spec on disk; read by the resource_enum tool-arg resolver |
+| `Endpoint` | `ai_latency_p50_ms` | float | p50 latency from the 1-token chat ping |
+| `Endpoint` | `ai_mcp_server_name` / `ai_mcp_server_version` / `ai_mcp_protocol_version` | string | MCP `InitializeResult` serverInfo + negotiated version |
+| `Endpoint` | `ai_mcp_tool_count` / `ai_mcp_resource_count` / `ai_mcp_prompt_count` | int | MCP manifest sizes |
+| `Endpoint` | `ai_mcp_caps` | string[] | advertised MCP capabilities (`tools`/`resources`/`prompts`/…) |
+| `Endpoint` | `ai_mcp_auth_required` | bool | 401 + `WWW-Authenticate` on the MCP endpoint |
+| `Endpoint` | `ai_mcp_tools_hash` / `ai_mcp_instructions_hash` | string (sha256) | rug-pull pins — change across scans flags a sleeper/rug-pull |
+| `Parameter` | `ai_tool_arg_path` | string (JSON Pointer) | now populated for MCP tool args (`/inputSchema/properties/<arg>`) |
+| `Technology` | `category="ai-vector-db"` via `USES_TECHNOLOGY {detected_by="ai-surface-recon-probe"}` | — | confirmed by a benign read against Chroma/Qdrant/Weaviate/Milvus |
+| `Technology` | `category="ai-*"` (e.g. `ai-runtime`) via `USES_TECHNOLOGY {detected_by="ai-surface-recon-julius"}` | — | AI service software (Ollama, vLLM, LiteLLM, …) confirmed by the Julius fingerprint pack, linked to the host Endpoint |
+
+**New `Vulnerability` source — `ai_surface_recon`** (MCP static findings):
+`type` ∈ {`mcp_tool_poisoning`, `mcp_prompt_injection`, `mcp_data_exfiltration`,
+`mcp_command_injection`, `mcp_code_execution`, `mcp_credential_harvesting`,
+`mcp_annotation_mismatch`}; carries `ai_owasp_llm_id`, `ai_atlas_technique`,
+`ai_payload_class="mcp_static"`, `evidence` (YARA matched string + offset).
+Deterministic `id` (`aisr_<sha16>`); linked to the MCP `Endpoint` via
+`HAS_VULNERABILITY` (fallback BaseURL → Subdomain → Domain).
+
 ### Properties reserved for later laps
 
 Documented here so the prefix convention stays coherent as later laps land. Empty / `IS NULL` until the relevant lap ships.
 
 | Node label | Reserved property | Lap |
 |---|---|---|
-| `Endpoint` | `ai_tool_schema_ref`, `ai_supports_streaming`, `ai_supports_tools`, `ai_supports_vision`, `ai_model_family_guess`, `ai_latency_p50_ms` | central ai_surface_recon lap |
-| `Vulnerability` | `ai_owasp_llm_id`, `ai_atlas_technique`, `ai_asr`, `ai_trials`, `ai_oracle_kind`, `ai_payload_class`, `ai_transcript_ref` | vuln_scan / ai_guardrail_probe lap |
+| `Vulnerability` | `ai_asr`, `ai_trials`, `ai_oracle_kind`, `ai_transcript_ref` | ai_guardrail_probe lap |
 | `CVE` | `is_ai_library` | vuln_scan AI library lookup lap |
 | `Secret` / `TrufflehogFinding` / `GithubSecret` | `ai_provider` | trufflehog / github-secret-hunt AI detector lap |
 | `JsReconFinding` | `finding_type` values `ai-sdk-client`, `ai-sdk-key-literal`, `ai-sdk-browser-allowed`, `ai-frontend-detected` | js_recon AI SDK lap |

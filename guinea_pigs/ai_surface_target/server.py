@@ -22,6 +22,8 @@ import sys
 
 from aiohttp import web
 
+import ai_surface_recon_endpoints as _aiep  # validated central-module response shapes
+
 from ai_signals import (
     ENDPOINT_AI_CLASSIFIER_PORT,
     HEADER_SHOWROOM_PORT,
@@ -41,6 +43,14 @@ from ai_signals import (
 # Port for the jsluice URL-verification end-to-end target. Independent of the
 # AI surface ports above so the AI lap-1 catalog tests stay untouched.
 JSLUICE_TARGET_PORT = 9102
+
+# Central ai_surface_recon module target: serves the REAL response shapes the
+# active probes confirm (chat / OpenAPI / models / Julius). AI header so
+# http_probe tags it -> it becomes an ai_surface_recon candidate host.
+AI_SURFACE_RECON_TARGET_PORT = 9106
+
+# Real MCP (Streamable HTTP) server, run as a subprocess by run_target.py.
+MCP_TARGET_PORT = 9107
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +123,20 @@ def make_port_app(descriptor: dict) -> web.Application:
     app.router.add_get("/", root)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/healthz", healthz)
+
+    # Vector-DB confirmation read: the ai_surface_recon module probes known
+    # vector-DB ports (Qdrant 6333, etc.) and confirms with a benign read.
+    # Serve the matching response so the confirmation actually fires.
+    name = descriptor.get("name", "")
+    if name.startswith("qdrant"):
+        async def qdrant_collections(_r: web.Request) -> web.Response:
+            return web.json_response({"result": {"collections": [{"name": "docs"}]},
+                                      "status": "ok", "time": 0.0})
+        app.router.add_get("/collections", qdrant_collections)
+    if name.startswith("milvus"):
+        async def milvus_collections(_r: web.Request) -> web.Response:
+            return web.json_response({"collections": []})
+        app.router.add_get("/v1/vector/collections", milvus_collections)
     return app
 
 
@@ -708,6 +732,93 @@ async def _start_site(app: web.Application, port: int, label: str) -> web.AppRun
     return runner
 
 
+def make_ai_surface_recon_app() -> web.Application:
+    """Central ai_surface_recon module target (port 9106).
+
+    Serves the REAL response shapes the module's active probes confirm, so a
+    full scan with the AI preset actually fires chat-shape detection, OpenAPI /
+    manifest parsing, model-family guessing, and Julius fingerprinting against
+    this host. An AI header (`x-vllm-version`) makes http_probe tag the port as
+    an AI surface, which makes it an ai_surface_recon candidate; the HTML index
+    links every AI path so Katana also discovers + classifies them. Reuses the
+    response bodies validated by validate_ai_surface_recon.py.
+    """
+    app = web.Application()
+
+    @web.middleware
+    async def ai_header_mw(request: web.Request, handler) -> web.Response:
+        resp = await handler(request)
+        # AI-stack header signatures so http_probe flags this as an AI surface.
+        resp.headers["x-vllm-version"] = "0.6.0"
+        resp.headers["openai-version"] = "2020-10-01"
+        return resp
+
+    app.middlewares.append(ai_header_mw)
+
+    chat_paths = [
+        "/v1/chat/completions", "/v1/messages", "/api/generate", "/api/chat",
+        "/v1beta/models/gemini-pro:generateContent", "/invoke", "/stream",
+    ]
+
+    async def index(_r: web.Request) -> web.Response:
+        links = "".join(f"<li><a href='{p}'>{p}</a></li>" for p in chat_paths)
+        # Body contains "Ollama is running" so the Julius ollama pack also matches.
+        body = ("<!DOCTYPE html><html><head><title>AI Surface Recon Target</title>"
+                "</head><body><h1>AI Surface Recon Target</h1>"
+                "<p>Ollama is running</p><ul>" + links +
+                "<li><a href='/v1/models'>/v1/models</a></li>"
+                "<li><a href='/openapi.json'>/openapi.json</a></li>"
+                "<li><a href='/.well-known/ai-plugin.json'>ai-plugin.json</a></li>"
+                "</ul></body></html>")
+        return web.Response(text=body, content_type="text/html")
+
+    async def api_tags(_r): return web.json_response(_aiep._API_TAGS)
+    async def api_version(_r): return web.json_response({"version": "0.3.0"})
+    async def v1_models(_r): return web.json_response(_aiep._V1_MODELS)
+    async def openapi(_r): return web.json_response(_aiep._OPENAPI)
+    async def ai_plugin(_r): return web.json_response(_aiep._AI_PLUGIN)
+
+    async def openai_chat(_r): return web.json_response(_aiep._OPENAI_CHAT)
+    async def anthropic(_r): return web.json_response(_aiep._ANTHROPIC)
+    async def ollama_gen(_r): return web.json_response(_aiep._OLLAMA_GEN)
+    async def ollama_chat(_r): return web.json_response(_aiep._OLLAMA_CHAT)
+    async def gemini(_r): return web.json_response(_aiep._GEMINI)
+    async def langserve(_r): return web.json_response(_aiep._LANGSERVE)
+
+    async def stream(_r):
+        sse = "data: " + json_dumps(_aiep._OPENAI_CHAT) + "\n\ndata: [DONE]\n\n"
+        return web.Response(text=sse, content_type="text/event-stream")
+
+    async def favicon(_r): return _empty_favicon()
+    async def healthz(_r): return web.Response(text="ok", content_type="text/plain")
+
+    app.router.add_get("/", index)
+    app.router.add_get("/favicon.ico", favicon)
+    app.router.add_get("/healthz", healthz)
+    app.router.add_get("/api/tags", api_tags)
+    app.router.add_get("/api/version", api_version)
+    app.router.add_get("/v1/models", v1_models)
+    app.router.add_get("/models", v1_models)
+    app.router.add_get("/openapi.json", openapi)
+    app.router.add_get("/swagger.json", openapi)
+    app.router.add_get("/v3/api-docs", openapi)
+    app.router.add_get("/.well-known/ai-plugin.json", ai_plugin)
+    for p in ("/v1/chat/completions", "/v1/completions", "/v1/responses"):
+        app.router.add_post(p, openai_chat)
+    app.router.add_post("/v1/messages", anthropic)
+    app.router.add_post("/api/generate", ollama_gen)
+    app.router.add_post("/api/chat", ollama_chat)
+    app.router.add_post("/v1beta/models/{model}:generateContent", gemini)
+    app.router.add_post("/invoke", langserve)
+    app.router.add_post("/stream", stream)
+    return app
+
+
+def json_dumps(d) -> str:
+    import json as _json
+    return _json.dumps(d)
+
+
 async def main() -> None:
     runners: list[web.AppRunner] = []
 
@@ -780,6 +891,17 @@ async def main() -> None:
             ZAP_AJAX_SHOWROOM_PORT,
             f"zap-ajax-spider showroom — {len(ZAP_AJAX_TEST_ENDPOINTS)} "
             f"discovery branches (XHR, pushState, cascade, GraphQL, auth-only)",
+        )
+    )
+
+    # 8. Central ai_surface_recon module target — real chat/OpenAPI/models/Julius shapes
+    runners.append(
+        await _start_site(
+            make_ai_surface_recon_app(),
+            AI_SURFACE_RECON_TARGET_PORT,
+            "ai-surface-recon target — chat shapes / OpenAPI / /v1/models / Julius "
+            "(MCP runs separately on port "
+            f"{MCP_TARGET_PORT})",
         )
     )
 

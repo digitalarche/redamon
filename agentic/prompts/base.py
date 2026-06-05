@@ -1532,7 +1532,7 @@ Common properties (all sources):
 - id (string): unique identifier
 - name (string): vulnerability name
 - severity (string): "critical", "high", "medium", "low", "info" (lowercase!)
-- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), or **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl)
+- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl), or **"ai_surface_recon"** (MCP tool-poisoning / prompt-injection-via-tool-description / data-exfiltration found by static YARA over MCP manifests; carries `ai_owasp_llm_id`, `ai_atlas_technique`, `type` like "mcp_tool_poisoning")
 - description (string): vulnerability description
 - cvss_score (float): 0.0 to 10.0
 
@@ -2357,11 +2357,21 @@ Properties currently written (lap 1 — domain_recon, port_scan, http_probe):
                   BaseURL = scheme+host+port. Endpoint = path under a BaseURL.
                   Reach Endpoint via (BaseURL)-[:HAS_ENDPOINT]->(Endpoint)
                   or directly by Endpoint.baseurl property.)
+                  Central ai_surface_recon module (active probes) also sets:
+                  `ai_supports_tools` / `ai_supports_vision` /
+                  `ai_supports_streaming` (bool), `ai_model_family_guess`
+                  (e.g. "gpt", "claude", "llama"), `ai_tool_schema_ref`
+                  (cached spec path), `ai_latency_p50_ms` (float), and for
+                  MCP servers `ai_mcp_server_name`, `ai_mcp_server_version`,
+                  `ai_mcp_protocol_version`, `ai_mcp_tool_count`,
+                  `ai_mcp_caps` (list), `ai_mcp_auth_required` (bool),
+                  `ai_mcp_tools_hash` / `ai_mcp_instructions_hash` (rug-pull pins).
   - Parameter:    `is_ai_prompt_injectable` (bool — set by resource_enum
                   when the parameter name is in the prompt-injection
                   catalogue AND the parent Endpoint is AI-classified),
-                  `ai_tool_arg_path` (string JSON Pointer — reserved for
-                  the central ai_surface_recon module, no value today)
+                  `ai_tool_arg_path` (string JSON Pointer — populated by the
+                  central ai_surface_recon module for MCP tool args, e.g.
+                  "/inputSchema/properties/query")
 
 Value-prefixed reused fields (lap 1):
 

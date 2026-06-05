@@ -133,6 +133,7 @@ OSINT analysts, threat intelligence teams, or red team operators building a targ
     // --- DISABLE JS Recon (crawls target) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory/API fuzzing ---
     ffufEnabled: false,
     kiterunnerEnabled: false,

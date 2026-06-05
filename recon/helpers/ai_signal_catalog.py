@@ -1455,3 +1455,153 @@ def resolve_ai_tool_arg_path(spec: dict, dialect: str, param_name: str) -> str |
     if not isinstance(cursor, dict) or param_name not in cursor:
         return None
     return f"{prefix}/{param_name}"
+
+
+# ===========================================================================
+# Central ai_surface_recon module constants (active probing).
+# Consumed only by recon/main_recon_modules/ai_surface_recon.py and its
+# partial-recon twin. These drive the active, protocol-aware workloads:
+# chat-shape probes, MCP handshake paths, OpenAPI discovery, vector-DB
+# confirmation reads, and model-family guessing. All benign; no payloads.
+# ===========================================================================
+
+# Canonical chat/completion/SSE paths to POST a 1-token "ping" against when a
+# host shows an AI signal but the crawl found no classified chat path.
+AI_CHAT_PROBE_PATHS: list[str] = [
+    "/v1/chat/completions",
+    "/openai/v1/chat/completions",  # Groq prefixes OpenAI paths with /openai
+    "/v1/completions",
+    "/v1/fim/completions",          # Mistral fill-in-middle (completion-shaped)
+    "/v1/responses",
+    "/v1/messages",
+    "/v2/chat",                     # Cohere v2 chat
+    "/v1/sonar",                    # Perplexity Sonar
+    "/api/chat",
+    "/api/generate",
+    "/chat/completions",
+    "/completion",
+    "/generate",
+    "/generate_stream",            # TGI streaming variant
+    "/invocations",                # TGI / SageMaker invoke
+    "/invoke",
+    "/stream",
+]
+
+# Response-shape classifiers: (family, list-of-required-json-keys (dot paths),
+# ai_interface_type). Matched against the parsed JSON body of a chat probe.
+# A 401/422 with an OpenAI-style {"error": ...} body still counts as a positive
+# OpenAI-compatible detection (handled in code, not here).
+AI_CHAT_RESPONSE_SHAPES: list[tuple[str, list[str], str]] = [
+    ("openai", ["choices"], "llm-chat"),
+    ("anthropic", ["content", "stop_reason"], "llm-chat"),
+    ("ollama", ["response"], "llm-completion"),
+    ("ollama-chat", ["message", "done"], "llm-chat"),
+    ("gemini", ["candidates"], "llm-chat"),
+    ("langserve", ["output"], "llm-chat"),
+]
+
+# MCP transport probe paths (Streamable HTTP + legacy SSE conventions).
+AI_MCP_PROBE_PATHS: list[str] = [
+    "/mcp",
+    "/sse",
+    "/messages",
+    "/message",
+    "/api/mcp",
+    "/mcp/sse",
+    "/",
+]
+
+# OpenAPI / manifest / model-listing discovery GETs.
+AI_OPENAPI_DISCOVERY_PATHS: list[str] = [
+    "/.well-known/ai-plugin.json",
+    "/openapi.json",
+    "/swagger.json",
+    "/v3/api-docs",
+    "/v1/models",
+    "/models",
+    "/api/tags",
+    "/api/version",
+]
+
+# Vector-DB confirmation reads: tech_name -> ordered list of (path, expected
+# substring) attempts. A 200 whose body contains the substring (empty == any
+# 200) confirms the service; the first endpoint that answers wins. Multiple
+# endpoints per DB absorb version/path drift (e.g. Chroma v1 -> v2 heartbeat).
+#
+# Candidates are unioned from TWO sources in _confirm_vector_dbs:
+#   - the port catalogue (AI_PORTS entries whose category == "ai-vector-db"), and
+#   - http_probe body/title fingerprints (info["ai_framework_name"]).
+# The second source is what lets a DB on a SHARED port still confirm: Chroma
+# (8000, catalogued ai-runtime) and Weaviate (8080, catalogued ai-frontend)
+# are only reachable via their http_probe fingerprint, not the port category.
+AI_VECTOR_DB_READS: dict[str, list[tuple[str, str]]] = {
+    # Chroma: heartbeat key is `"nanosecond heartbeat"` on both v1 and v2.
+    "chroma":   [("/api/v2/heartbeat", "heartbeat"),
+                 ("/api/v1/heartbeat", "heartbeat"),
+                 ("/api/v1/collections", "")],
+    # Qdrant: root returns {"title":"qdrant - vector search engine",...};
+    # /collections returns {"result":{...},"status":"ok",...}.
+    "qdrant":   [("/", "qdrant"), ("/collections", "result")],
+    # Weaviate: /v1/meta always carries a "modules" object; ready is 200-empty.
+    "weaviate": [("/v1/meta", "modules"), ("/v1/.well-known/ready", "")],
+    # Milvus: REST surface varies by version/port; /healthz on the metrics
+    # port answers "OK". (gRPC port 19530 won't speak HTTP — best-effort.)
+    "milvus":   [("/v1/vector/collections", ""), ("/healthz", "")],
+}
+
+# Lowercase tokens used to map a model id / family string to a family bucket.
+AI_MODEL_FAMILY_TOKENS: list[str] = [
+    "gpt", "o1", "o3", "claude", "llama", "mistral", "mixtral", "qwen",
+    "gemini", "gemma", "command-r", "command", "phi", "deepseek", "yi",
+    "falcon", "vicuna", "codellama", "starcoder", "nous", "openchat",
+]
+
+
+def classify_ai_chat_response(parsed_json: dict) -> str | None:
+    """Return an ai_interface_type from a parsed chat-probe JSON body, or None.
+
+    Matches the strongest shape in AI_CHAT_RESPONSE_SHAPES (all required
+    top-level keys present). Ordered by specificity (first match wins).
+    """
+    if not isinstance(parsed_json, dict):
+        return None
+    keys = set(parsed_json.keys())
+    for _family, required, iface in AI_CHAT_RESPONSE_SHAPES:
+        if all(k in keys for k in required):
+            return iface
+    return None
+
+
+def guess_model_family(model_ids: list[str]) -> str | None:
+    """Map a list of model id/family strings to a single family token.
+
+    Picks the first AI_MODEL_FAMILY_TOKENS hit across the ids (longest token
+    first so 'codellama' beats 'llama'). Returns None when nothing matches.
+    """
+    if not model_ids:
+        return None
+    blob = " ".join(str(m).lower() for m in model_ids if m)
+    for token in sorted(AI_MODEL_FAMILY_TOKENS, key=len, reverse=True):
+        if token in blob:
+            return token
+    return None
+
+
+def pick_tool_dialect(spec: dict) -> str | None:
+    """Guess the tool-schema dialect of a single tool spec for resolve_ai_tool_arg_path.
+
+    openai-functions -> has a 'function' wrapper or top-level 'parameters'
+    anthropic-tools  -> has 'input_schema'
+    mcp-tools-list   -> has 'inputSchema'
+    """
+    if not isinstance(spec, dict):
+        return None
+    if "inputSchema" in spec:
+        return "mcp-tools-list"
+    if "input_schema" in spec:
+        return "anthropic-tools"
+    if "function" in spec and isinstance(spec.get("function"), dict):
+        return "openai-functions"
+    if "parameters" in spec:
+        return "openai-functions"
+    return None

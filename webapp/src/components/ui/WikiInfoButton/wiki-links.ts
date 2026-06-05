@@ -61,6 +61,9 @@ export const TOOL_WIKI: Record<string, { page: string; anchor?: string }> = {
   // JS Recon
   JsRecon:            { page: 'JS-Reconnaissance' },
 
+  // AI Surface Recon (Phase 4.5)
+  AiSurfaceRecon:     { page: 'Adversarial-AI-Recon', anchor: 'ai-surface-recon-active-probing' },
+
   // Vulnerability Scanning
   Nuclei:             { page: 'Project-Settings-Reference', anchor: 'vulnerability-scanner-nuclei' },
   GraphqlScan:        { page: 'GraphQL-Security-Testing' },
@@ -90,6 +93,7 @@ export const SECTION_WIKI: Record<string, { page: string; anchor?: string }> = {
   ToolMatrix:       { page: 'AI-Agent-Guide' },
   AttackSkills:     { page: 'Agent-Skills' },
   CypherFixSettings:{ page: 'CypherFix-Automated-Remediation' },
+  EndpointAiClassifier: { page: 'Adversarial-AI-Recon', anchor: 'endpoint-ai-classifier' },
   Github:           { page: 'GitHub-Secret-Hunting' },
   Trufflehog:       { page: 'TruffleHog-Secret-Scanning' },
   GvmScan:          { page: 'GVM-Vulnerability-Scanning' },

@@ -72,6 +72,7 @@ from recon.partial_recon_modules.parameter_discovery import (
     run_kiterunner,
 )
 from recon.partial_recon_modules.endpoint_ai_classification import run_endpoint_ai_classifier
+from recon.partial_recon_modules.ai_surface_recon import run_ai_surface_recon as run_ai_surface_partial
 from recon.partial_recon_modules.js_analysis import run_jsrecon
 from recon.partial_recon_modules.graphql_scanning import run_graphqlscan
 from recon.partial_recon_modules.vulnerability_scanning import (
@@ -140,6 +141,8 @@ def main():
         run_arjun(config)
     elif tool_id == "EndpointAiClassifier":
         run_endpoint_ai_classifier(config)
+    elif tool_id == "AiSurfaceRecon":
+        run_ai_surface_partial(config)
     elif tool_id == "JsRecon":
         run_jsrecon(config)
     elif tool_id == "GraphqlScan":

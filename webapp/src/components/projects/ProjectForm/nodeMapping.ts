@@ -17,6 +17,7 @@ export const SECTION_INPUT_MAP: Record<string, string[]> = {
   Kiterunner:         ['BaseURL'],
   Arjun:              ['BaseURL', 'Endpoint'],
   EndpointAiClassifier: ['Endpoint', 'Parameter', 'BaseURL'],
+  AiSurfaceRecon:     ['BaseURL', 'Endpoint', 'Service'],
   Nuclei:             ['BaseURL', 'Endpoint', 'Technology', 'Domain', 'Subdomain'],
   CveLookup:          ['Technology'],
   GvmScan:            ['IP', 'Port', 'Subdomain', 'Domain'],
@@ -49,6 +50,7 @@ export const SECTION_NODE_MAP: Record<string, string[]> = {
   Kiterunner:         ['Endpoint', 'BaseURL'],
   Arjun:              ['Parameter'],
   EndpointAiClassifier: [],   // produces no new nodes — pure enrichment
+  AiSurfaceRecon:     ['Vulnerability'],   // annotates Endpoint/Parameter/Technology; creates MCP-poisoning Vulnerability
   Nuclei:             ['Vulnerability', 'Endpoint', 'Parameter', 'CVE', 'MitreData', 'Capec'],
   CveLookup:          ['CVE', 'MitreData', 'Capec'],
   GvmScan:            ['Vulnerability', 'Technology', 'Traceroute', 'Certificate', 'ExploitGvm', 'CVE', 'MitreData', 'Capec'],
@@ -72,6 +74,7 @@ export const SECTION_ENRICH_MAP: Record<string, string[]> = {
   Nmap:               ['Port', 'Service'],
   Httpx:              ['Subdomain', 'Domain'],
   EndpointAiClassifier: ['Endpoint', 'Parameter'],
+  AiSurfaceRecon:     ['Endpoint', 'Parameter', 'Technology'],
   SecurityChecks:     ['IP'],
   GraphqlScan:        ['Endpoint'],
   VhostSni:           ['Subdomain', 'IP'],

@@ -123,6 +123,7 @@ Red team operators in the pre-engagement phase, OSINT analysts building target p
     // --- DISABLE JS Recon (crawls and downloads from target) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
 

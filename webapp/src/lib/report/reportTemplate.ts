@@ -509,7 +509,8 @@ function renderTOC(data: ReportData): string {
   if (data.vhostSni.totalFindings > 0 || data.vhostSni.ipsTested > 0) {
     dynamicSections.push({ id: 'vhost-sni', label: 'VHost & SNI Enumeration' })
   }
-  if (data.aiSurface.totalAiEndpoints > 0 || data.aiSurface.ragIngestEndpoints > 0 || data.aiSurface.promptInjectableParams > 0) {
+  if (data.aiSurface.totalAiEndpoints > 0 || data.aiSurface.ragIngestEndpoints > 0 || data.aiSurface.promptInjectableParams > 0
+      || data.aiSurface.mcpServers > 0 || data.aiSurface.mcpPoisoningFindings > 0 || data.aiSurface.vectorDbs > 0) {
     dynamicSections.push({ id: 'ai-surface', label: 'AI Surface' })
   }
   if (data.otx.totalPulses > 0 || data.otx.totalMalware > 0) {
@@ -1352,7 +1353,8 @@ function renderVhostSni(data: ReportData): string {
 
 function renderAiSurface(data: ReportData): string {
   const ai = data.aiSurface
-  if (ai.totalAiEndpoints === 0 && ai.ragIngestEndpoints === 0 && ai.promptInjectableParams === 0) return ''
+  if (ai.totalAiEndpoints === 0 && ai.ragIngestEndpoints === 0 && ai.promptInjectableParams === 0
+      && ai.mcpServers === 0 && ai.mcpPoisoningFindings === 0 && ai.vectorDbs === 0) return ''
 
   const typeRows = ai.byInterfaceType.map(t =>
     `<tr><td>${t.interfaceType}</td><td style="text-align: right">${t.count}</td></tr>`
@@ -1386,7 +1388,12 @@ function renderAiSurface(data: ReportData): string {
     <div class="kpi"><div class="kpi-value">${ai.totalAiEndpoints}</div><div class="kpi-label">AI Endpoints</div></div>
     <div class="kpi"><div class="kpi-value">${ai.ragIngestEndpoints}</div><div class="kpi-label">RAG Ingest Endpoints</div></div>
     <div class="kpi"><div class="kpi-value">${ai.promptInjectableParams}</div><div class="kpi-label">Prompt-Injectable Params</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.mcpServers}</div><div class="kpi-label">MCP Servers</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.mcpPoisoningFindings}</div><div class="kpi-label">MCP Tool-Poisoning Findings</div></div>
+    <div class="kpi"><div class="kpi-value">${ai.vectorDbs}</div><div class="kpi-label">Vector DBs</div></div>
   </div>
+
+  ${ai.modelFamilies.length ? `<p><strong>Model families detected:</strong> ${ai.modelFamilies.map(f => `<code>${f}</code>`).join(', ')}</p>` : ''}
 
   ${typeRows ? `<h3>Distribution by Interface Type</h3>
   <table><thead><tr><th>Interface Type</th><th style="text-align: right">Endpoints</th></tr></thead>

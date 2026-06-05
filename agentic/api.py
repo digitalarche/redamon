@@ -1761,7 +1761,10 @@ async def test_llm_provider(body: LlmProviderTestRequest):
         if ptype == "openai":
             llm = setup_llm("gpt-4o-mini", openai_api_key=body.apiKey)
         elif ptype == "anthropic":
-            llm = setup_llm("claude-sonnet-4-20250514", anthropic_api_key=body.apiKey)
+            # Connection check uses a current, valid alias (no date suffix).
+            # Dated snapshots like claude-sonnet-4-20250514 are deprecated and 404
+            # once retired. claude-opus-4-6 still accepts the temperature param.
+            llm = setup_llm("claude-opus-4-6", anthropic_api_key=body.apiKey)
         elif ptype == "openrouter":
             llm = setup_llm("openrouter/openai/gpt-4o-mini", openrouter_api_key=body.apiKey)
         elif ptype == "deepseek":

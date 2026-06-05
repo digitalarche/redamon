@@ -5283,5 +5283,84 @@ class TestRunVhostSni(unittest.TestCase):
                 os.unlink(f.name)
 
 
+class TestRunAiSurfaceRecon(unittest.TestCase):
+    """Tests for the AI Surface Recon partial-recon orchestration.
+
+    The partial module loads AI-tagged endpoints from the graph, reuses the
+    full-pipeline runner, then persists via the mixin. We mock the graph client,
+    settings, and the shared runner to verify the wiring without a live Neo4j.
+    """
+
+    def _run_with_mocks(self, config, ep_rows=None):
+        # Fake Neo4j session: every .run() returns the provided rows (default empty).
+        fake_session = MagicMock()
+        fake_session.run.return_value = ep_rows or []
+        fake_session.__enter__ = MagicMock(return_value=fake_session)
+        fake_session.__exit__ = MagicMock(return_value=False)
+
+        mock_client = MagicMock()
+        mock_client.driver.session.return_value = fake_session
+        mock_client.update_graph_from_ai_surface_recon.return_value = {}
+
+        mock_neo4j_mod = MagicMock()
+        mock_neo4j_mod.Neo4jClient = MagicMock(return_value=mock_client)
+
+        mock_project_settings = MagicMock()
+        mock_project_settings.get_settings = MagicMock(return_value={"AI_SURFACE_RECON_ENABLED": True})
+
+        # Shared runner: passthrough that stamps a marker so we know it ran.
+        def _fake_run_full(recon_data, output_file=None, settings=None):
+            recon_data["ai_surface_recon"] = {"summary": {}, "by_url": {}, "findings": [], "vector_db": []}
+            return recon_data
+        mock_full_mod = MagicMock()
+        mock_full_mod.run_ai_surface_recon = MagicMock(side_effect=_fake_run_full)
+
+        saved = {}
+        to_mock = {
+            'graph_db.neo4j_client': mock_neo4j_mod,
+            'recon.project_settings': mock_project_settings,
+            'recon.main_recon_modules.ai_surface_recon': mock_full_mod,
+        }
+        for name, mod in to_mock.items():
+            saved[name] = sys.modules.get(name)
+            sys.modules[name] = mod
+        os.environ["USER_ID"] = "u"
+        os.environ["PROJECT_ID"] = "p"
+        try:
+            import importlib
+            import recon.partial_recon_modules.ai_surface_recon as mod
+            importlib.reload(mod)
+            mod.run_ai_surface_recon(config)
+            return mock_client, mock_full_mod
+        finally:
+            for name, m in saved.items():
+                if m is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = m
+            os.environ.pop("USER_ID", None)
+            os.environ.pop("PROJECT_ID", None)
+
+    def test_empty_graph_no_persist(self):
+        """No AI surfaces in the graph -> runner is not invoked, no crash."""
+        client, full = self._run_with_mocks({"domain": "x.com"}, ep_rows=[])
+        full.run_ai_surface_recon.assert_not_called()
+        client.update_graph_from_ai_surface_recon.assert_not_called()
+
+    def test_with_ai_endpoint_runs_and_persists(self):
+        """An AI-tagged endpoint -> runner runs and results are persisted."""
+        row = {
+            "base_url": "http://h", "path": "/v1/chat/completions",
+            "method": "POST", "iface": "llm-chat", "ai_fw": True,
+        }
+        # Make the row behave like a neo4j Record (supports __getitem__),
+        # returning None for columns this query doesn't have (vdb reuse).
+        rec = MagicMock()
+        rec.__getitem__ = lambda _self, k: row.get(k)
+        client, full = self._run_with_mocks({"domain": "h"}, ep_rows=[rec])
+        full.run_ai_surface_recon.assert_called_once()
+        client.update_graph_from_ai_surface_recon.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -299,11 +299,15 @@ export interface ReportData {
     findings: VhostSniFindingRecord[]
   }
 
-  // AI Surface Recon (Lap-2 — Endpoint AI Classifier)
+  // AI Surface Recon (Lap-2 Endpoint AI Classifier + central ai_surface_recon lap)
   aiSurface: {
     totalAiEndpoints: number
     ragIngestEndpoints: number
     promptInjectableParams: number
+    mcpServers: number
+    mcpPoisoningFindings: number
+    vectorDbs: number
+    modelFamilies: string[]
     byInterfaceType: { interfaceType: string; count: number }[]
     findings: AiSurfaceRecord[]
   }
@@ -518,6 +522,8 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       aiSurfaceData.totalAiEndpoints * 5
       + aiSurfaceData.ragIngestEndpoints * 15
       + aiSurfaceData.promptInjectableParams * 25
+      + aiSurfaceData.mcpPoisoningFindings * 30
+      + aiSurfaceData.vectorDbs * 15
     const rawRisk = vulnScore + cveScore + gvmExploitScore + kevScore
       + chainExploitScore + chainFindingsScore + capecScore
       + secretsScore + sensitiveFilesScore + injectableScore
@@ -1463,10 +1469,44 @@ async function queryAiSurface(session: any, pid: string) {
     }
   })
 
+  // Central ai_surface_recon lap: MCP servers, MCP tool-poisoning findings,
+  // confirmed vector DBs, and model families discovered by active probing.
+  const mcpRes = await session.run(
+    `MATCH (e:Endpoint {project_id: $pid}) WHERE e.ai_interface_type = 'mcp'
+     RETURN count(e) AS n`,
+    { pid }
+  )
+  const mcpServers = ((mcpRes.records[0]?.get('n') as { toNumber?: () => number })?.toNumber?.()) ?? (mcpRes.records[0]?.get('n') as number) ?? 0
+
+  const mcpVulnRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'ai_surface_recon'})
+     RETURN count(v) AS n`,
+    { pid }
+  )
+  const mcpPoisoningFindings = ((mcpVulnRes.records[0]?.get('n') as { toNumber?: () => number })?.toNumber?.()) ?? (mcpVulnRes.records[0]?.get('n') as number) ?? 0
+
+  const vdbRes = await session.run(
+    `MATCH (t:Technology {project_id: $pid, category: 'ai-vector-db'})
+     RETURN count(DISTINCT t) AS n`,
+    { pid }
+  )
+  const vectorDbs = ((vdbRes.records[0]?.get('n') as { toNumber?: () => number })?.toNumber?.()) ?? (vdbRes.records[0]?.get('n') as number) ?? 0
+
+  const famRes = await session.run(
+    `MATCH (e:Endpoint {project_id: $pid}) WHERE e.ai_model_family_guess IS NOT NULL
+     RETURN DISTINCT e.ai_model_family_guess AS fam`,
+    { pid }
+  )
+  const modelFamilies = famRes.records.map((r: { get(k: string): unknown }) => r.get('fam') as string).filter(Boolean)
+
   return {
     totalAiEndpoints,
     ragIngestEndpoints,
     promptInjectableParams,
+    mcpServers,
+    mcpPoisoningFindings,
+    vectorDbs,
+    modelFamilies,
     byInterfaceType,
     findings,
   }

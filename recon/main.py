@@ -59,6 +59,7 @@ from recon.main_recon_modules.port_scan import run_port_scan, run_port_scan_isol
 from recon.main_recon_modules.masscan_scan import run_masscan_scan, run_masscan_scan_isolated
 from recon.main_recon_modules.http_probe import run_http_probe
 from recon.main_recon_modules.resource_enum import run_resource_enum
+from recon.main_recon_modules.ai_surface_recon import run_ai_surface_recon
 from recon.main_recon_modules.vuln_scan import run_vuln_scan
 from recon.main_recon_modules.add_mitre import run_mitre_enrichment
 
@@ -366,6 +367,32 @@ def save_recon_file(data: dict, output_file: Path):
     with _save_lock:
         with open(output_file, 'w') as f:
             json.dump(data, f, indent=2)
+
+
+def _maybe_run_ai_surface(result: dict, settings: dict, output_file: Path) -> dict:
+    """GROUP 4.5 — AI Surface Recon. Runs after resource_enum at every call site.
+
+    Gated purely on AI_SURFACE_RECON_ENABLED (the js_recon pattern), not
+    SCAN_MODULES. Failure-soft: a probe error records a phase_error and the
+    pipeline continues.
+    """
+    if not settings.get('AI_SURFACE_RECON_ENABLED', True):
+        return result
+    try:
+        result = run_ai_surface_recon(result, output_file=output_file, settings=settings)
+        result.setdefault("metadata", {}).setdefault("modules_executed", [])
+        if "ai_surface_recon" not in result["metadata"]["modules_executed"]:
+            result["metadata"]["modules_executed"].append("ai_surface_recon")
+        save_recon_file(result, output_file)
+        _graph_update_bg("update_graph_from_ai_surface_recon", result, USER_ID, PROJECT_ID)
+    except Exception as e:
+        print(f"[!][AISurfaceRecon] failed: {e}")
+        result.setdefault("metadata", {}).setdefault("phase_errors", {})["ai_surface_recon"] = str(e)
+        try:
+            save_recon_file(result, output_file)
+        except Exception:
+            pass
+    return result
 
 
 def merge_port_scan_results(combined_result: dict) -> None:
@@ -881,6 +908,9 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
                 combined_result["metadata"].setdefault("phase_errors", {})["resource_enum"] = str(e)
                 save_recon_file(combined_result, output_file)
 
+    # GROUP 4.5 -- AI Surface Recon (runs after resource_enum)
+    combined_result = _maybe_run_ai_surface(combined_result, settings, output_file)
+
     # GROUP 5b -- JS Recon (runs after resource_enum, before vuln_scan;
     # runs even when active scans are skipped -- uploaded files don't need live targets)
     if settings.get('JS_RECON_ENABLED', False):
@@ -1383,6 +1413,9 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
                 combined_result["metadata"].setdefault("phase_errors", {})["resource_enum"] = str(e)
                 save_recon_file(combined_result, output_file)
 
+    # GROUP 4.5 — AI Surface Recon (runs after resource_enum)
+    combined_result = _maybe_run_ai_surface(combined_result, _settings, output_file)
+
     # GROUP 5b — JS Recon (runs after resource_enum, before vuln_scan;
     # runs even when active scans are skipped -- uploaded files don't need live targets)
     if _settings.get('JS_RECON_ENABLED', False):
@@ -1844,6 +1877,9 @@ def main():
 
                     with open(output_file, 'w') as f:
                         json.dump(domain_result, f, indent=2)
+
+        # GROUP 4.5 — AI Surface Recon (runs after resource_enum)
+        domain_result = _maybe_run_ai_surface(domain_result, _settings, output_file)
 
         # GROUP 5b — JS Recon (runs after resource_enum, before vuln_scan;
         # runs even when active scans are skipped -- uploaded files don't need live targets)

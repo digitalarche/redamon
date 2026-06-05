@@ -153,6 +153,23 @@ export const reconPresetSchema = z.object({
   resourceEnumAiParamInjectableFlagEnabled: bool,
   resourceEnumAiToolArgPathEnabled: bool,
 
+  // -- AI Surface Recon (central module: active AI/LLM/MCP fingerprinting) --
+  aiSurfaceReconEnabled: bool,
+  aiSurfaceReconTimeout: int,
+  aiSurfaceReconMaxWorkers: int,
+  aiSurfaceReconUserAgent: str,
+  aiSurfaceReconChatShapeProbeEnabled: bool,
+  aiSurfaceReconMcpHandshakeEnabled: bool,
+  aiSurfaceReconMcpListToolsEnabled: bool,
+  aiSurfaceReconMcpYaraEnabled: bool,
+  aiSurfaceReconOpenapiDiscoveryEnabled: bool,
+  aiSurfaceReconModelListEnabled: bool,
+  aiSurfaceReconVectorDbReadEnabled: bool,
+  aiSurfaceReconJuliusProbePackEnabled: bool,
+  aiSurfaceReconLatencyBaselineEnabled: bool,
+  aiSurfaceReconCacheEnabled: bool,
+  aiSurfaceReconProbePackVersion: str,
+
   // -- Web Crawling: Katana --
   katanaEnabled: bool,
   katanaDepth: int,
@@ -615,6 +632,23 @@ export const RECON_PARAMETER_CATALOG = `
 - resourceEnumAiRagPathFlagEnabled: boolean - Stamp Endpoint.is_ai_rag_ingest=true for known RAG paths (OpenAI Vector Stores, Pinecone /vectors/upsert, Weaviate /v1/objects, Qdrant /collections/.../points). Ambiguous paths (/upload, /search, /query) only fire when parent BaseURL is AI-tagged.
 - resourceEnumAiParamInjectableFlagEnabled: boolean - Stamp Parameter.is_ai_prompt_injectable=true on AI-classified endpoints when the parameter name matches the prompt-injection catalogue (prompt, messages, system, contents, inputs, arguments, etc.)
 - resourceEnumAiToolArgPathEnabled: boolean - Reserved for the future ai_surface_recon central module — resolves Parameter.ai_tool_arg_path against discovered OpenAPI / ai-plugin.json / MCP tools/list specs. No-op today.
+
+## AI Surface Recon (central module, ACTIVE)
+- aiSurfaceReconEnabled: boolean - Master toggle. Active protocol-aware AI/LLM/MCP fingerprinting that runs after resource_enum. Benign shape-probes only (1-token chat ping, MCP handshake, read-only GETs) against hosts already showing an AI signal.
+- aiSurfaceReconTimeout: number - Per-probe HTTP timeout in seconds (default 10).
+- aiSurfaceReconMaxWorkers: number - Per-host probe concurrency (default 5; stealth halves to 2).
+- aiSurfaceReconUserAgent: string - User-Agent sent on every probe.
+- aiSurfaceReconChatShapeProbeEnabled: boolean - POST a 1-token ping to candidate chat paths and classify the response shape; confirms Endpoint.ai_interface_type + streaming.
+- aiSurfaceReconMcpHandshakeEnabled: boolean - Run the MCP initialize handshake (Streamable HTTP + legacy SSE); capture server/version/protocol/capabilities/auth.
+- aiSurfaceReconMcpListToolsEnabled: boolean - Enumerate MCP tools/resources/prompts; create a Parameter per tool arg. Off in stealth.
+- aiSurfaceReconMcpYaraEnabled: boolean - Static YARA scan of MCP tool descriptions/schemas/instructions for tool poisoning / prompt injection / exfiltration; writes Vulnerability nodes.
+- aiSurfaceReconOpenapiDiscoveryEnabled: boolean - Fetch + parse openapi.json / ai-plugin.json to extract tool schemas and capability flags; sets ai_tool_schema_ref, ai_supports_tools/vision/streaming, ai_tool_arg_path.
+- aiSurfaceReconModelListEnabled: boolean - Read /v1/models and /api/tags to guess the model family (gpt/claude/llama/...). Sets Endpoint.ai_model_family_guess.
+- aiSurfaceReconVectorDbReadEnabled: boolean - One benign read to candidate vector-DB ports (Chroma/Qdrant/Weaviate/Milvus) to confirm Technology(category=ai-vector-db). Off in stealth.
+- aiSurfaceReconJuliusProbePackEnabled: boolean - Run the vendored Julius HTTP fingerprint packs to identify AI service software and promote a Technology node.
+- aiSurfaceReconLatencyBaselineEnabled: boolean - Record p50 latency of the chat ping on each LLM endpoint (Endpoint.ai_latency_p50_ms).
+- aiSurfaceReconCacheEnabled: boolean - Cache probe responses on disk so repeat scans skip already-tested payloads.
+- aiSurfaceReconProbePackVersion: string - Pinned probe-pack identifier recorded on every annotation (default "latest").
 
 ## Web Crawling - Katana
 - katanaEnabled: boolean - Run Katana web crawler

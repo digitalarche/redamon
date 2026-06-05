@@ -371,22 +371,23 @@ def test_prompt_does_not_advertise_unsupported_categories():
 
 def test_prompt_does_not_promise_lap2plus_properties():
     """The plan reserves these properties for later laps (vuln_scan,
-    trufflehog, central ai_surface_recon). Listing them now in the prompt
-    would lead the agent to write Cypher against fields that simply don't
-    exist yet, yielding empty results and confusing the operator.
+    trufflehog). Listing them now in the prompt would lead the agent to write
+    Cypher against fields that simply don't exist yet, yielding empty results
+    and confusing the operator.
 
     Note: ai_interface_type, is_ai_rag_ingest, is_ai_prompt_injectable and
-    ai_tool_arg_path are NO LONGER on this list — they ship with the
-    resource_enum AI classifier lap and are correctly listed in the prompt.
+    ai_tool_arg_path ship with the resource_enum AI classifier lap, and
+    ai_tool_schema_ref / ai_supports_streaming / ai_supports_tools /
+    ai_supports_vision / ai_model_family_guess / ai_latency_p50_ms / ai_mcp_*
+    ship with the central ai_surface_recon lap — all are correctly listed in
+    the prompt and NO LONGER on this reserved list.
     """
     block = _extract_ai_block(_extract_text_to_cypher_block(_read_prompt_source()))
     reserved_for_later_laps = [
-        "ai_tool_schema_ref",    # Endpoint, central ai_surface_recon lap
-        "ai_supports_streaming", # Endpoint, central lap
-        "ai_supports_tools",     # Endpoint, central lap
-        "ai_supports_vision",    # Endpoint, central lap
-        "ai_owasp_llm_id",       # Vulnerability, vuln_scan lap
-        "ai_atlas_technique",    # Vulnerability, vuln_scan lap
+        "ai_asr",                # Vulnerability, ai_guardrail_probe lap
+        "ai_trials",             # Vulnerability, ai_guardrail_probe lap
+        "ai_oracle_kind",        # Vulnerability, ai_guardrail_probe lap
+        "ai_transcript_ref",     # Vulnerability, ai_guardrail_probe lap
         "ai_provider",           # Secret, trufflehog lap
         "is_ai_library",         # CVE, vuln_scan lap
     ]

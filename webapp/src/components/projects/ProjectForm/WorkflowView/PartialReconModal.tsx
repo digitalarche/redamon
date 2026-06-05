@@ -139,6 +139,13 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
     'flags is_ai_rag_ingest on RAG ingestion paths, and marks parameters whose names match the prompt-injection catalogue as is_ai_prompt_injectable. ' +
     'No traffic is sent to the target — pure pattern matching against data the URL-discovery tools already collected. ' +
     'Useful when the catalogue has been updated, when a new lap of AI annotations ships, or when classifier toggles were off during the original scan.',
+  AiSurfaceRecon:
+    'Re-runs the active AI/LLM/MCP surface probes against the AI surfaces already in the graph. ' +
+    'Confirms chat endpoints (1-token shape probe), runs the MCP handshake and tool enumeration with static tool-poisoning analysis, ' +
+    'parses OpenAPI / ai-plugin manifests, guesses the model family, and confirms vector databases. ' +
+    'Probes only hosts already showing an AI signal; sends benign shape-probes only (no jailbreaks, no payloads). ' +
+    'Enriches Endpoint / Parameter / Technology nodes and creates MCP tool-poisoning Vulnerability nodes. ' +
+    'Useful after the probe packs or YARA rules are updated, or when the module was off during the original scan.',
   JsRecon:
     'Comprehensive JavaScript reconnaissance scanner. Downloads JS files from discovered URLs ' +
     'and runs 6 analysis modules: secret detection (100+ patterns with live validation), endpoint extraction, ' +
@@ -576,6 +583,7 @@ export function PartialReconModal({
     || (isResourceEnum && !isNuclei && toolId !== 'JsRecon' && toolId !== 'ZapAjaxSpider' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0)
     || (isArjun && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
     || (toolId === 'EndpointAiClassifier' && !loadingInputs && (graphInputs?.existing_endpoints_count ?? 0) === 0)
+    || (toolId === 'AiSurfaceRecon' && !loadingInputs && (graphInputs?.existing_ai_endpoints_count ?? 0) === 0 && (graphInputs?.existing_vector_db_services_count ?? 0) === 0)
     || (isSecurityChecks && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0 && (graphInputs?.existing_subdomains_count ?? 0) === 0 && (graphInputs?.existing_baseurls_count ?? 0) === 0)
     || (toolId === 'Shodan' && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0)
     || (toolId === 'OsintEnrichment' && !loadingInputs && (graphInputs?.existing_ips_count ?? 0) === 0)

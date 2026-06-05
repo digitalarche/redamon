@@ -100,6 +100,7 @@ Security teams auditing email spoofing defenses (SPF, DMARC, DKIM), DNS administ
     jsluiceEnabled: false,
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- Directory/API/Parameter fuzzing: disabled ---
     ffufEnabled: false,
     kiterunnerEnabled: false,

@@ -147,6 +147,7 @@ Bug bounty hunters triaging a new target. You want to know if there are quick wi
     // --- DISABLE JS Recon (too slow for quick scan) ---
     jsReconEnabled: false,
 
+    aiSurfaceReconEnabled: false,
     // --- DISABLE directory fuzzing ---
     ffufEnabled: false,
     ffufParallelism: 4,

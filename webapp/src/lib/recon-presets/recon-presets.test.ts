@@ -3406,8 +3406,8 @@ describe('Preset merge logic', () => {
 // ============================================================
 
 describe('Preset system integrity', () => {
-  test('registry contains exactly 22 presets', () => {
-    expect(RECON_PRESETS).toHaveLength(22)
+  test('registry contains exactly 23 presets', () => {
+    expect(RECON_PRESETS).toHaveLength(23)
   })
 
   test('every preset has all required fields with correct types', () => {
@@ -3850,7 +3850,7 @@ describe('GraphQL Recon preset', () => {
     expect(uniqueIds.size).toBe(ids.length)
   })
 
-  test('is included in the registry (current count: 22)', () => {
-    expect(RECON_PRESETS.length).toBe(22)
+  test('is included in the registry (current count: 23)', () => {
+    expect(RECON_PRESETS.length).toBe(23)
   })
 })

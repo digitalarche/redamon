@@ -26,7 +26,7 @@ export function ResourceEnumAiSection({ data, updateField, onRun }: ResourceEnum
           <Brain size={16} />
           Endpoint AI Classifier
           <NodeInfoTooltip section="EndpointAiClassifier" />
-          <WikiInfoButton target="Adversarial-AI-Recon" />
+          <WikiInfoButton target="EndpointAiClassifier" />
           <span className={styles.badgePassive}>Passive</span>
         </h2>
         <div className={styles.sectionHeaderRight}>

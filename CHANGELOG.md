@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [4.15.0] - 2026-06-05
+
+### Added
+
+- **AI Surface Recon — active AI/LLM/MCP/vector-DB fingerprinting** ([recon/main_recon_modules/ai_surface_recon.py](recon/main_recon_modules/ai_surface_recon.py), [recon/helpers/probe_pack_engine.py](recon/helpers/probe_pack_engine.py), [graph_db/mixins/recon/ai_surface_recon_mixin.py](graph_db/mixins/recon/ai_surface_recon_mixin.py)) — new recon module (display **Phase 4.5**, after resource enumeration) that sends benign, protocol-aware probes to confirm and characterize the AI surfaces earlier passive phases only flagged. Seven independently-toggled workloads run per host (hosts in parallel, workloads sequential): (1) chat-shape probe — confirms an LLM endpoint + dialect + streaming + p50 latency without a key (a `401`/`422` OpenAI-style error body is a positive); (2) MCP handshake + `tools/list` + Cisco YARA static scan — enumerates the tool surface unauthenticated and flags tool-poisoning / prompt-injection; (3) OpenAPI / `ai-plugin.json` / model-listing discovery; (4) Julius YAML probe-pack engine (Praetorian matcher reimplemented in Python) for runtime fingerprints; (5) vector-DB confirmation reads (qdrant / chroma / weaviate / milvus) that double as an unauthenticated-exposure signal. It is black-box and benign — no jailbreaking, injection, or credentials, and **zero LLM calls**. Writes `ai_*` property annotations onto existing `Endpoint` / `Parameter` / `Technology` nodes (COALESCE-merged, zero new labels) plus MCP tool-poisoning `Vulnerability` nodes. 15 new project settings + Prisma columns, stealth-aware. Has an on-demand partial-recon twin. Heavy deps (`mcp`, `yara`, `prance`, `jq`, `PyYAML`) are lazy-imported so a missing library degrades one workload, not the run. Docs: [readmes/AI_SURFACE_RECON_MODULE.md](readmes/AI_SURFACE_RECON_MODULE.md) + wiki [Adversarial AI Recon](https://github.com/samugit83/redamon/wiki/Adversarial-AI-Recon#ai-surface-recon-active-probing). Coverage: [recon/tests/test_ai_surface_recon_module.py](recon/tests/test_ai_surface_recon_module.py), [test_ai_surface_recon_mixin.py](recon/tests/test_ai_surface_recon_mixin.py), [test_ai_surface_catalog.py](recon/tests/test_ai_surface_catalog.py), [test_probe_pack_engine.py](recon/tests/test_probe_pack_engine.py).
+
+- **AI Surface & AI Risk graph tables** ([webapp/src/app/graph/components/RedZoneTables/AiTables.tsx](webapp/src/app/graph/components/RedZoneTables/AiTables.tsx), [aiSurface/route.ts](webapp/src/app/api/analytics/redzone/aiSurface/route.ts), [aiRisk/route.ts](webapp/src/app/api/analytics/redzone/aiRisk/route.ts)) — two new Data Table presets in the Red Zone dropdown that turn the new `ai_*` enrichment into operator views. **AI Surface** (inventory) aggregates every AI / LLM / MCP / vector-DB surface across all modules into 5 sub-sheets (LLM Endpoints, MCP Servers, AI Technologies, Vector DBs, Model Inventory); **AI Risk** (offensive, OWASP-LLM / MITRE ATLAS) surfaces the attackable findings in 5 sub-sheets (MCP Tool Poisoning, Injectable Params, RAG Ingestion, Exposed Runtimes, Unauthenticated MCP). Both reuse the shared red-zone shell (per-sheet search, refresh, XLSX / JSON / MD export). Coverage: [aiTablesRoutes.test.ts](webapp/src/app/api/analytics/redzone/aiTablesRoutes.test.ts), [AiTables.test.tsx](webapp/src/app/graph/components/RedZoneTables/AiTables.test.tsx).
+
+### Fixed
+
+- **Agent crash-loop** — the new graph mixin imported `recon` at module load; the agent image has no `recon` package. Made the import lazy.
+- **Anthropic provider test 404** — the test hardcoded a retired model snapshot; now uses `claude-opus-4-6`.
+- **No-provider project create** — the LLM-provider gate now shows immediately on Create (and on Save), instead of the form flashing first then a broken model picker.
+
+---
+
 ## [4.14.1] - 2026-06-04
 
 ### Fixed

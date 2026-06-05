@@ -272,6 +272,10 @@ function condenseForAgent(data: ReturnType<typeof gatherReportData> extends Prom
       totalAiEndpoints: data.aiSurface.totalAiEndpoints,
       ragIngestEndpoints: data.aiSurface.ragIngestEndpoints,
       promptInjectableParams: data.aiSurface.promptInjectableParams,
+      mcpServers: data.aiSurface.mcpServers,
+      mcpPoisoningFindings: data.aiSurface.mcpPoisoningFindings,
+      vectorDbs: data.aiSurface.vectorDbs,
+      modelFamilies: data.aiSurface.modelFamilies,
       byInterfaceType: data.aiSurface.byInterfaceType,
       // Top 15 endpoints for the LLM's narrative (full 50 stay in the HTML report)
       sampleEndpoints: data.aiSurface.findings.slice(0, 15).map(f => ({

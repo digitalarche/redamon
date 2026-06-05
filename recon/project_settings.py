@@ -245,6 +245,25 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED': True,
     'RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED': True,
 
+    # AI Surface Recon (central module) — active, protocol-aware AI/LLM/MCP
+    # fingerprinting. Runs after resource_enum (display Phase 4.5). Benign
+    # shape-probes only; gated per-workload, stealth flips actives off.
+    'AI_SURFACE_RECON_ENABLED': True,
+    'AI_SURFACE_RECON_TIMEOUT': 10,
+    'AI_SURFACE_RECON_MAX_WORKERS': 5,
+    'AI_SURFACE_RECON_USER_AGENT': 'RedAmon-AISurfaceRecon/1.0',
+    'AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED': True,
+    'AI_SURFACE_RECON_MCP_YARA_ENABLED': True,
+    'AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED': True,
+    'AI_SURFACE_RECON_MODEL_LIST_ENABLED': True,
+    'AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED': True,
+    'AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED': True,
+    'AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED': True,
+    'AI_SURFACE_RECON_CACHE_ENABLED': True,
+    'AI_SURFACE_RECON_PROBE_PACK_VERSION': 'latest',
+
     # Katana Web Crawler
     'KATANA_ENABLED': True,
     'KATANA_DOCKER_IMAGE': 'projectdiscovery/katana:latest',
@@ -933,6 +952,23 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED'] = project.get('resourceEnumAiRagPathFlagEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_RAG_PATH_FLAG_ENABLED'])
     settings['RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED'] = project.get('resourceEnumAiParamInjectableFlagEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_PARAM_INJECTABLE_FLAG_ENABLED'])
     settings['RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED'] = project.get('resourceEnumAiToolArgPathEnabled', DEFAULT_SETTINGS['RESOURCE_ENUM_AI_TOOL_ARG_PATH_ENABLED'])
+
+    # AI Surface Recon (central module)
+    settings['AI_SURFACE_RECON_ENABLED'] = project.get('aiSurfaceReconEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_ENABLED'])
+    settings['AI_SURFACE_RECON_TIMEOUT'] = project.get('aiSurfaceReconTimeout', DEFAULT_SETTINGS['AI_SURFACE_RECON_TIMEOUT'])
+    settings['AI_SURFACE_RECON_MAX_WORKERS'] = project.get('aiSurfaceReconMaxWorkers', DEFAULT_SETTINGS['AI_SURFACE_RECON_MAX_WORKERS'])
+    settings['AI_SURFACE_RECON_USER_AGENT'] = project.get('aiSurfaceReconUserAgent', DEFAULT_SETTINGS['AI_SURFACE_RECON_USER_AGENT'])
+    settings['AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED'] = project.get('aiSurfaceReconChatShapeProbeEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_CHAT_SHAPE_PROBE_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED'] = project.get('aiSurfaceReconMcpHandshakeEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_HANDSHAKE_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'] = project.get('aiSurfaceReconMcpListToolsEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'])
+    settings['AI_SURFACE_RECON_MCP_YARA_ENABLED'] = project.get('aiSurfaceReconMcpYaraEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MCP_YARA_ENABLED'])
+    settings['AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED'] = project.get('aiSurfaceReconOpenapiDiscoveryEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_OPENAPI_DISCOVERY_ENABLED'])
+    settings['AI_SURFACE_RECON_MODEL_LIST_ENABLED'] = project.get('aiSurfaceReconModelListEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_MODEL_LIST_ENABLED'])
+    settings['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'] = project.get('aiSurfaceReconVectorDbReadEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'])
+    settings['AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED'] = project.get('aiSurfaceReconJuliusProbePackEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_JULIUS_PROBE_PACK_ENABLED'])
+    settings['AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED'] = project.get('aiSurfaceReconLatencyBaselineEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_LATENCY_BASELINE_ENABLED'])
+    settings['AI_SURFACE_RECON_CACHE_ENABLED'] = project.get('aiSurfaceReconCacheEnabled', DEFAULT_SETTINGS['AI_SURFACE_RECON_CACHE_ENABLED'])
+    settings['AI_SURFACE_RECON_PROBE_PACK_VERSION'] = project.get('aiSurfaceReconProbePackVersion', DEFAULT_SETTINGS['AI_SURFACE_RECON_PROBE_PACK_VERSION'])
 
     # Katana Web Crawler
     settings['KATANA_ENABLED'] = project.get('katanaEnabled', DEFAULT_SETTINGS['KATANA_ENABLED'])
@@ -1648,10 +1684,16 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     settings['GRAPHQL_COP_TEST_DIRECTIVE_OVERLOADING'] = False
     settings['GRAPHQL_COP_TEST_CIRCULAR_INTROSPECTION'] = False
 
+    # --- AI Surface Recon: keep passive probes on, flip the marginally-active
+    # ones off, throttle concurrency. Stealth = quieter, not off. ---
+    settings['AI_SURFACE_RECON_MAX_WORKERS'] = 2
+    settings['AI_SURFACE_RECON_MCP_LIST_TOOLS_ENABLED'] = False  # extra JSON-RPC calls
+    settings['AI_SURFACE_RECON_VECTOR_DB_READ_ENABLED'] = False  # one GET per service
+
     logger.info("Stealth overrides applied: Naabu=passive, Masscan=OFF, httpx=low-rate, Katana=minimal, "
                 "Nuclei=no-DAST, Kiterunner=OFF, BannerGrab=OFF, BruteForce=OFF, "
                 "ActiveSecurityChecks=OFF, JsRecon=reduced, GraphQL=introspection-only, "
-                "GraphQLCop=no-DoS")
+                "GraphQLCop=no-DoS, AISurfaceRecon=throttled")
 
     return settings
 

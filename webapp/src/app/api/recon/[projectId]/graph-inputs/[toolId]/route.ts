@@ -897,6 +897,52 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    else if (toolId === 'AiSurfaceRecon') {
+      try {
+        const session = getSession()
+        try {
+          const result = await session.run(
+            `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
+             WITH d
+             OPTIONAL MATCH (b:BaseURL {user_id: $uid, project_id: $pid})
+             WITH d, collect(DISTINCT b.url) AS baseurls
+             OPTIONAL MATCH (e:Endpoint {user_id: $uid, project_id: $pid})
+             WITH d, baseurls,
+                  count(DISTINCT CASE WHEN (e.ai_interface_type IS NOT NULL AND e.ai_interface_type <> 'non-llm') OR e.is_ai_framework_detected = true THEN e END) AS aiEndpoints,
+                  count(DISTINCT CASE WHEN e.ai_interface_type = 'mcp' THEN e END) AS mcpEndpoints
+             OPTIONAL MATCH (svc)-[:HAS_TECHNOLOGY|USES_TECHNOLOGY]->(t:Technology {category: 'ai-vector-db', user_id: $uid, project_id: $pid})
+             RETURN d.name AS domain, baseurls, size(baseurls) AS baseurlCount, aiEndpoints, mcpEndpoints,
+                    count(DISTINCT svc) AS vectorDbServices`,
+            { uid: project.userId, pid: projectId }
+          )
+          const record = result.records[0]
+          const domain = record?.get('domain') || null
+          const baseurls: string[] = record?.get('baseurls') || []
+          const baseurlCount = record?.get('baseurlCount')?.toNumber?.() ?? record?.get('baseurlCount') ?? 0
+          const aiEndpoints = record?.get('aiEndpoints')?.toNumber?.() ?? record?.get('aiEndpoints') ?? 0
+          const mcpEndpoints = record?.get('mcpEndpoints')?.toNumber?.() ?? record?.get('mcpEndpoints') ?? 0
+          const vectorDbServices = record?.get('vectorDbServices')?.toNumber?.() ?? record?.get('vectorDbServices') ?? 0
+
+          if (domain) {
+            return NextResponse.json({
+              domain,
+              existing_subdomains_count: 0,
+              existing_baseurls: baseurls,
+              existing_baseurls_count: baseurlCount,
+              existing_ai_endpoints_count: aiEndpoints,
+              existing_mcp_endpoints_count: mcpEndpoints,
+              existing_vector_db_services_count: vectorDbServices,
+              source: 'graph',
+            })
+          }
+        } finally {
+          await session.close()
+        }
+      } catch (err) {
+        console.warn('Neo4j query failed for AiSurfaceRecon graph-inputs, falling back to settings:', err)
+      }
+    }
+
     // Fallback: return domain from project settings
     return NextResponse.json({
       domain: project.targetDomain || null,
