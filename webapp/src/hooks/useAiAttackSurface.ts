@@ -12,14 +12,27 @@ export interface AiAttackLogLine {
   timestamp: string
 }
 
+export interface LaunchTarget {
+  baseurl: string
+  path: string
+  method?: string
+  interface_type?: string   // custom targets carry their own shape
+  model?: string
+  custom?: boolean
+}
+
 export interface LaunchPayload {
   tool: string
-  targets: { baseurl: string; path: string; method?: string }[]
+  targets: LaunchTarget[]
   bounds: { trials?: number; asr_threshold?: number; judge_model?: string; max_turns?: number }
   roe_confirmed: boolean
   dry_run?: boolean
   probes?: string[]
   target_model?: string
+  // Target auth (shared): resolved from the UI auth mode.
+  api_key?: string
+  auth_header?: string
+  auth_scheme?: string
 }
 
 export function useAiAttackSurface(projectId: string | null) {

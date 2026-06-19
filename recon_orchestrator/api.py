@@ -930,6 +930,8 @@ async def start_ai_attack_surface(project_id: str, request: AiAttackSurfaceStart
         "probes": request.probes,
         "target_model": request.target_model,
         "api_key": request.api_key,
+        "auth_header": request.auth_header,
+        "auth_scheme": request.auth_scheme,
         "user_id": request.user_id,
         "webapp_api_url": request.webapp_api_url,
     }

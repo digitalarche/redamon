@@ -96,7 +96,11 @@ describe('start route', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const res = await startRoute.POST(
-      req({ tool: 'garak', targets: [{ baseurl: 'http://h', path: '/c' }], bounds: { trials: 1 }, roe_confirmed: true, probes: ['dan'] }),
+      req({
+        tool: 'garak', targets: [{ baseurl: 'http://h', path: '/c', custom: true }],
+        bounds: { trials: 1 }, roe_confirmed: true, probes: ['dan'],
+        api_key: 'tok', auth_header: 'Authorization', auth_scheme: 'Bearer',
+      }),
       params('proj1') as never,
     )
     const body = await res.json()
@@ -107,7 +111,10 @@ describe('start route', () => {
     expect(forwarded).toMatchObject({
       project_id: 'proj1', user_id: 'user1', tool: 'garak',
       roe_confirmed: true, probes: ['dan'],
+      api_key: 'tok', auth_header: 'Authorization', auth_scheme: 'Bearer',
     })
+    // custom target passes through verbatim
+    expect(forwarded.targets[0]).toMatchObject({ baseurl: 'http://h', custom: true })
   })
 
   test('surfaces orchestrator error status', async () => {

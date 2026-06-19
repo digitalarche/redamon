@@ -174,6 +174,20 @@ class TestTargetLoader(unittest.TestCase):
         self.assertEqual(len(targets), 1)
         self.assertIsNone(targets[0].ai_interface_type)  # placeholder
 
+    def test_custom_offgraph_target_carries_iface_and_model(self):
+        # An arbitrary URL not in the graph, with operator-supplied shape.
+        session = MagicMock()
+        session.run.return_value.single.return_value = None
+        targets = tl.load_targets(session, "u", "p", selected=[{
+            "baseurl": "http://custom:9000", "path": "/v1/chat/completions",
+            "method": "POST", "interface_type": "llm-chat", "model": "mistral",
+            "custom": True,
+        }])
+        self.assertEqual(len(targets), 1)
+        self.assertEqual(targets[0].ai_interface_type, "llm-chat")
+        self.assertEqual(targets[0].ai_model_ids, ["mistral"])
+        self.assertEqual(targets[0].url, "http://custom:9000/v1/chat/completions")
+
     def test_selection_without_baseurl_skipped(self):
         session = MagicMock()
         targets = tl.load_targets(session, "u", "p", selected=[{"path": "/x"}])
@@ -212,10 +226,15 @@ class TestNormalizer(unittest.TestCase):
         for key in ("id", "user_id", "project_id", "source", "type", "name",
                     "severity", "ai_owasp_llm_id", "ai_atlas_technique", "ai_asr",
                     "ai_trials", "ai_oracle_kind", "ai_payload_class",
-                    "ai_transcript_ref", "ai_probe_pack_version"):
+                    "ai_transcript_ref", "ai_probe_pack_version", "ai_target_url"):
             self.assertIn(key, props)
         self.assertEqual(props["ai_asr"], 0.4)
         self.assertEqual(props["severity"], "medium")  # default lowercased
+
+    def test_target_url_stored_for_offgraph_display(self):
+        props = norm._props(self._finding(baseurl="http://h:8000/", path="/v1/chat/completions"),
+                            "vid", "u", "p")
+        self.assertEqual(props["ai_target_url"], "http://h:8000/v1/chat/completions")
 
     def test_write_finding_linked_to_endpoint(self):
         session = MagicMock()

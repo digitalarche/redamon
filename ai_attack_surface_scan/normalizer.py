@@ -58,6 +58,14 @@ def finding_id(finding: Finding) -> str:
     return f"aiatk_{digest}"
 
 
+def _target_url(finding: Finding) -> str:
+    base = (finding.baseurl or "").rstrip("/")
+    path = finding.path or "/"
+    if path and not path.startswith("/"):
+        path = "/" + path
+    return f"{base}{path}"
+
+
 def _props(finding: Finding, vid: str, user_id: str, project_id: str) -> dict:
     return {
         "id": vid,
@@ -65,6 +73,9 @@ def _props(finding: Finding, vid: str, user_id: str, project_id: str) -> dict:
         "project_id": project_id,
         "source": finding.source,
         "type": finding.vuln_type,
+        # The attacked URL, stored on the finding so custom (off-graph) targets
+        # still display a target even when no Endpoint node exists to link to.
+        "ai_target_url": _target_url(finding),
         "name": finding.name,
         "severity": (finding.severity or "medium").lower(),
         "description": finding.description or finding.name,

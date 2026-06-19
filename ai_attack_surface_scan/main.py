@@ -53,6 +53,8 @@ def run_tool(cfg, targets) -> list:
                     judge_base_url=cfg.judge_base_url or None,
                     target_model=cfg.target_model or None,
                     api_key=cfg.api_key or None,
+                    auth_header=cfg.auth_header or None,
+                    auth_scheme=cfg.auth_scheme or None,
                     probes=cfg.probes or None,
                 ))
             except Exception as e:  # one target failing must not abort the job

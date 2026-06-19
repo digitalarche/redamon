@@ -49,8 +49,14 @@ class RunConfig:
     # The model id the TARGET serves (for the tool's request body). Falls back to
     # recon's ai_model_ids / ai_model_family_guess when empty.
     target_model: str = ""
-    # Optional bearer key for an authenticated target (garak REST $KEY).
-    api_key: str = ""
+    # Target authentication (shared across all tools; the tool adapter applies it
+    # when building its request to the target). Three modes resolve to these:
+    #   none   -> api_key="", auth_header=""
+    #   bearer -> api_key=<token>, auth_header="Authorization", auth_scheme="Bearer"
+    #   custom -> api_key=<value>, auth_header=<name>, auth_scheme="" (or a scheme)
+    api_key: str = ""           # the secret value (-> garak REST_API_KEY / $KEY)
+    auth_header: str = ""       # header name to carry the key, e.g. Authorization
+    auth_scheme: str = ""       # scheme prefix, e.g. "Bearer" (empty for raw key)
     # Optional per-tool probe/plugin override (e.g. garak probe families). Empty
     # => the adapter's default catalog.
     probes: list[str] = field(default_factory=list)
@@ -102,5 +108,7 @@ def load_config() -> RunConfig:
         judge_base_url=str(data.get("judge_base_url", "") or ""),
         target_model=str(data.get("target_model", "") or ""),
         api_key=str(data.get("api_key", "") or ""),
+        auth_header=str(data.get("auth_header", "") or ""),
+        auth_scheme=str(data.get("auth_scheme", "") or ""),
         probes=data.get("probes", []) or [],
     )

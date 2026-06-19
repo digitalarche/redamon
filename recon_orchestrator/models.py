@@ -279,7 +279,11 @@ class AiAttackSurfaceStartRequest(BaseModel):
     dry_run: bool = False
     probes: list[str] = []                     # per-tool probe/plugin selection (garak families, etc.)
     target_model: str = ""                     # model id the target serves (else derived from recon)
-    api_key: str = ""                          # optional bearer key for an authenticated target
+    # Target authentication (shared across tools): the secret + the header that
+    # carries it + an optional scheme prefix (e.g. "Bearer").
+    api_key: str = ""
+    auth_header: str = ""
+    auth_scheme: str = ""
 
 
 class AiAttackSurfaceState(BaseModel):

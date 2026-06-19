@@ -36,7 +36,8 @@ def _severity(asr: float) -> str:
 
 def run(target, bounds, output_dir: str, run_id: str,
         judge_base_url: str | None = None, probes: list[str] | None = None,
-        target_model: str | None = None, api_key: str | None = None) -> list[Finding]:
+        target_model: str | None = None, api_key: str | None = None,
+        auth_header: str | None = None, auth_scheme: str | None = None) -> list[Finding]:
     """Run garak against one target and return findings above the ASR threshold.
 
     Failure-soft: if garak can't run or produces no report, returns [] (the job
@@ -48,7 +49,7 @@ def run(target, bounds, output_dir: str, run_id: str,
 
     config = build_rest_config(
         target, model=target_model,
-        api_key_header="Authorization" if api_key else None,
+        auth_header=auth_header, auth_scheme=auth_scheme,
     )
     config_path = out / "garak_rest.json"
     config_path.write_text(json.dumps(config, indent=2))

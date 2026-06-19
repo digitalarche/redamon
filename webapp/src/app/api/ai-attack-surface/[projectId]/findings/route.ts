@@ -33,7 +33,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
               v.ai_probe_pack_version AS probePackVersion, v.ai_transcript_ref AS transcriptRef,
               v.evidence AS evidence, v.description AS description,
               head([l IN labels(parent) WHERE l <> 'Vulnerability']) AS targetType,
-              coalesce(parent.baseurl, parent.url, parent.name) AS target,
+              // Prefer the linked node; fall back to the URL stored on the
+              // finding so custom (off-graph) targets still show a target.
+              coalesce(parent.baseurl, parent.url, parent.name, v.ai_target_url) AS target,
               parent.path AS endpointPath
        LIMIT 2000`,
       { pid: projectId, sources: AI_ATTACK_SOURCES },

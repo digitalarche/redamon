@@ -73,10 +73,18 @@ describe('AI Attack Surface page', () => {
     expect(screen.getByText('LLM01')).toBeTruthy()
   })
 
-  test('garak Configure is disabled when no chat endpoint was discovered', () => {
+  test('garak Configure stays enabled with no endpoint (custom targets allowed)', () => {
     render(<AiAttackSurfacePage />)   // targets = [] by default
     const btn = screen.getByText('Configure') as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
+    expect(btn.disabled).toBe(false)
+  })
+
+  test('opening garak with no endpoints still shows the custom-target form + auth', () => {
+    render(<AiAttackSurfacePage />)
+    fireEvent.click(screen.getByText('Configure'))
+    expect(screen.getByText(/Attack a URL not in the graph/)).toBeTruthy()
+    expect(screen.getByText('Target authentication')).toBeTruthy()
+    expect(screen.getByText('Bearer token')).toBeTruthy()
   })
 
   test('opening garak (with a target) shows the four-block detail + the target row', () => {

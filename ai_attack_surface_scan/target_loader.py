@@ -139,10 +139,20 @@ def _load_selected(session, user_id, project_id, selected) -> list[Target]:
         if row:
             targets.append(_row_to_target(row.data()))
         else:
-            # The picker selected something that isn't in the graph; surface a
-            # placeholder target from the raw selection so the run is honest
-            # about what was requested vs found.
-            logger.warning(f"Selected endpoint not found in graph: {baseurl} {path}")
-            targets.append(Target(baseurl=baseurl, path=path, method=method or "POST"))
+            # Not in the graph: either a custom URL the operator typed, or a
+            # selection the graph lost. Build a placeholder from the raw
+            # selection, carrying any interface_type/model the operator supplied
+            # for a custom target (so the request shape can still be inferred).
+            model = sel.get("model")
+            model_ids = [model] if model else None
+            if sel.get("custom"):
+                logger.info(f"Custom (off-graph) target: {baseurl}{path}")
+            else:
+                logger.warning(f"Selected endpoint not found in graph: {baseurl} {path}")
+            targets.append(Target(
+                baseurl=baseurl, path=path, method=method or "POST",
+                ai_interface_type=sel.get("interface_type"),
+                ai_model_ids=model_ids,
+            ))
     logger.info(f"Target loader: {len(targets)} selected endpoint(s)")
     return targets

@@ -41,6 +41,27 @@
 .probeRow { display: flex; flex-wrap: wrap; gap: 14px; }
 .probe { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 
+/* Custom (off-graph) target form */
+.customTag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid rgba(168,85,247,0.6); color: #a855f7; border-radius: 4px; padding: 0 5px; }
+.iconBtn { background: transparent; border: none; color: inherit; opacity: 0.5; cursor: pointer; margin-left: auto; }
+.iconBtn:hover { opacity: 1; color: #ef4444; }
+.customForm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(128,128,128,0.2); }
+.customFormLabel { font-size: 12px; opacity: 0.6; width: 100%; }
+.customForm input, .customForm select { padding: 5px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; }
+.customUrl { flex: 1; min-width: 240px; }
+.customModel { width: 140px; }
+.addBtn { display: flex; align-items: center; gap: 4px; border: 1px solid rgba(128,128,128,0.4); background: transparent; color: inherit; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; }
+.addBtn:hover { background: rgba(128,128,128,0.12); }
+
+/* Target authentication */
+.authBlock { margin: 12px 0; padding: 12px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; }
+.authTitle { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.authModes { display: flex; gap: 16px; margin: 10px 0; }
+.authMode { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.authInput { width: 100%; padding: 6px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; }
+.authCustom { display: flex; gap: 8px; flex-wrap: wrap; }
+.authCustom input { padding: 6px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; flex: 1; min-width: 160px; }
+
 .boundsRow { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
 .boundsRow label { display: flex; flex-direction: column; font-size: 12px; opacity: 0.8; gap: 4px; }
 .boundsRow input { width: 110px; padding: 5px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; }

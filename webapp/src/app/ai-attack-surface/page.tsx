@@ -1,12 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Loader2, Play, ShieldAlert, Square, Terminal } from 'lucide-react'
+import { AlertTriangle, KeyRound, Loader2, Play, Plus, ShieldAlert, Square, Terminal, Trash2 } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { useAiAttackSurface } from '@/hooks/useAiAttackSurface'
 import {
-  ALL_CARDS, ATTACK_CHIPS, GARAK_CARD,
-  type ChipKey, type ToolCard,
+  ALL_CARDS, ATTACK_CHIPS, GARAK_CARD, resolveAuth, splitUrl,
+  type AuthMode, type ChipKey, type CustomTarget, type ToolCard,
 } from '@/lib/aiAttackSurface'
 import styles from './page.module.css'
 
@@ -38,6 +38,19 @@ export default function AiAttackSurfacePage() {
   const [judgeModel, setJudgeModel] = useState('qwen2.5:7b')
   const [roeConfirmed, setRoeConfirmed] = useState(false)
 
+  // Shared: target auth (None / Bearer / Custom header) — reused by every tool.
+  const [authMode, setAuthMode] = useState<AuthMode>('none')
+  const [bearerToken, setBearerToken] = useState('')
+  const [customHeaderName, setCustomHeaderName] = useState('x-api-key')
+  const [customHeaderValue, setCustomHeaderValue] = useState('')
+
+  // Shared: custom (off-graph) targets the operator types in.
+  const [customTargets, setCustomTargets] = useState<CustomTarget[]>([])
+  const [customUrl, setCustomUrl] = useState('')
+  const [customIface, setCustomIface] = useState('llm-chat')
+  const [customModel, setCustomModel] = useState('')
+  const [customErr, setCustomErr] = useState<string | null>(null)
+
   useEffect(() => {
     if (projectId) {
       s.loadTargets()
@@ -61,19 +74,45 @@ export default function AiAttackSurfacePage() {
     apply(next)
   }
 
+  const addCustomTarget = () => {
+    const parsed = splitUrl(customUrl)
+    if (!parsed) {
+      setCustomErr('Enter a full URL, e.g. https://api.example.com/v1/chat/completions')
+      return
+    }
+    setCustomErr(null)
+    setCustomTargets((prev) => [...prev, {
+      baseUrl: parsed.baseUrl, path: parsed.path, method: 'POST',
+      interfaceType: customIface, model: customModel.trim(),
+    }])
+    setCustomUrl('')
+    setCustomModel('')
+  }
+
   const launchGarak = async () => {
     const chosen = s.targets.filter((t) => selectedTargets.has(targetKey(t)))
+    const graphTargets = chosen.map((t) => ({ baseurl: t.baseUrl, path: t.path, method: t.method }))
+    const custom = customTargets.map((c) => ({
+      baseurl: c.baseUrl, path: c.path, method: c.method,
+      interface_type: c.interfaceType, model: c.model || undefined, custom: true,
+    }))
+    const auth = resolveAuth({
+      mode: authMode, bearerToken,
+      headerName: customHeaderName, headerValue: customHeaderValue,
+    })
     await s.launch({
       tool: 'garak',
-      targets: chosen.map((t) => ({ baseurl: t.baseUrl, path: t.path, method: t.method })),
+      targets: [...graphTargets, ...custom],
       bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel },
       roe_confirmed: roeConfirmed,
       probes: Array.from(selectedProbes),
+      ...auth,
     })
   }
 
+  const totalTargets = selectedTargets.size + customTargets.length
   const running = s.run?.status === 'running' || s.run?.status === 'starting'
-  const canLaunch = selectedTargets.size > 0 && selectedProbes.size > 0 && roeConfirmed && !s.launching && !running
+  const canLaunch = totalTargets > 0 && selectedProbes.size > 0 && roeConfirmed && !s.launching && !running
 
   return (
     <div className={styles.page}>
@@ -103,7 +142,9 @@ export default function AiAttackSurfacePage() {
       {/* Card grid */}
       <div className={styles.grid}>
         {cards.map((card) => {
-          const greyed = !card.available || !hasChat
+          // Greyed only when the tool isn't shipped. Even with no discovered
+          // endpoint the card opens, so an operator can add a custom target.
+          const greyed = !card.available
           return (
             <div key={card.id} className={`${styles.card} ${greyed ? styles.cardGreyed : ''}`}>
               <div className={styles.cardChips}>
@@ -156,6 +197,35 @@ export default function AiAttackSurfacePage() {
                 </label>
               )
             })}
+
+            {/* Custom (off-graph) targets */}
+            {customTargets.map((c, i) => (
+              <div key={`custom-${i}`} className={styles.row}>
+                <span className={styles.customTag}>custom</span>
+                <span className={styles.rowMain}>{c.baseUrl}{c.path}</span>
+                <span className={styles.rowCtx}>{c.interfaceType}{c.model ? ` · ${c.model}` : ''}</span>
+                <button type="button" className={styles.iconBtn}
+                        onClick={() => setCustomTargets((p) => p.filter((_, j) => j !== i))}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+
+            <div className={styles.customForm}>
+              <span className={styles.customFormLabel}>Attack a URL not in the graph:</span>
+              <input type="text" placeholder="https://api.example.com/v1/chat/completions"
+                     value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} className={styles.customUrl} />
+              <select value={customIface} onChange={(e) => setCustomIface(e.target.value)}>
+                <option value="llm-chat">llm-chat</option>
+                <option value="llm-completion">llm-completion</option>
+              </select>
+              <input type="text" placeholder="model (optional)" value={customModel}
+                     onChange={(e) => setCustomModel(e.target.value)} className={styles.customModel} />
+              <button type="button" className={styles.addBtn} onClick={addCustomTarget}>
+                <Plus size={14} /> Add
+              </button>
+            </div>
+            {customErr && <p className={styles.err}>{customErr}</p>}
           </section>
 
           {/* 2. Probes */}
@@ -184,6 +254,34 @@ export default function AiAttackSurfacePage() {
               <label>Judge<input type="text" value={judgeModel}
                      onChange={(e) => setJudgeModel(e.target.value)} /></label>
             </div>
+
+            {/* Target authentication (shared) */}
+            <div className={styles.authBlock}>
+              <span className={styles.authTitle}><KeyRound size={13} /> Target authentication</span>
+              <div className={styles.authModes}>
+                {(['none', 'bearer', 'custom'] as AuthMode[]).map((m) => (
+                  <label key={m} className={styles.authMode}>
+                    <input type="radio" name="authmode" checked={authMode === m}
+                           onChange={() => setAuthMode(m)} />
+                    {m === 'none' ? 'None' : m === 'bearer' ? 'Bearer token' : 'Custom header'}
+                  </label>
+                ))}
+              </div>
+              {authMode === 'bearer' && (
+                <input type="password" placeholder="token (sent as Authorization: Bearer …)"
+                       value={bearerToken} onChange={(e) => setBearerToken(e.target.value)}
+                       className={styles.authInput} autoComplete="off" />
+              )}
+              {authMode === 'custom' && (
+                <div className={styles.authCustom}>
+                  <input type="text" placeholder="header name (e.g. x-api-key)"
+                         value={customHeaderName} onChange={(e) => setCustomHeaderName(e.target.value)} />
+                  <input type="password" placeholder="key value" value={customHeaderValue}
+                         onChange={(e) => setCustomHeaderValue(e.target.value)} autoComplete="off" />
+                </div>
+              )}
+            </div>
+
             <label className={styles.roe}>
               <input type="checkbox" checked={roeConfirmed} onChange={(e) => setRoeConfirmed(e.target.checked)} />
               <AlertTriangle size={14} /> I confirm this is an authorized, in-scope target (RoE).

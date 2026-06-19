@@ -106,6 +106,56 @@ export interface AiFinding {
   endpointPath: string | null
 }
 
+// --- Target authentication (shared across all tools) ---------------------- //
+// Three UI modes resolve to the {api_key, auth_header, auth_scheme} the backend
+// applies. Reusable by every tool's detail view (PyRIT/giskard/promptfoo).
+export type AuthMode = 'none' | 'bearer' | 'custom'
+
+export interface AuthConfig {
+  mode: AuthMode
+  bearerToken?: string   // bearer mode
+  headerName?: string    // custom mode (e.g. x-api-key, api-key, X-Authorization)
+  headerValue?: string   // custom mode key value
+}
+
+export interface ResolvedAuth {
+  api_key: string
+  auth_header: string
+  auth_scheme: string
+}
+
+export function resolveAuth(a: AuthConfig): ResolvedAuth {
+  if (a.mode === 'bearer') {
+    return { api_key: a.bearerToken || '', auth_header: 'Authorization', auth_scheme: 'Bearer' }
+  }
+  if (a.mode === 'custom') {
+    return { api_key: a.headerValue || '', auth_header: (a.headerName || '').trim(), auth_scheme: '' }
+  }
+  return { api_key: '', auth_header: '', auth_scheme: '' }
+}
+
+// --- Custom (off-graph) target -------------------------------------------- //
+// Attack an arbitrary URL not discovered by recon. Shared across tools.
+export interface CustomTarget {
+  baseUrl: string
+  path: string
+  method: string
+  interfaceType: string   // llm-chat / llm-completion (drives the request shape)
+  model: string
+}
+
+/** Split a full URL into {baseUrl, path}. Returns null if unparseable. */
+export function splitUrl(raw: string): { baseUrl: string; path: string } | null {
+  try {
+    const u = new URL(raw.trim())
+    const baseUrl = `${u.protocol}//${u.host}`
+    const path = (u.pathname || '/') + (u.search || '')
+    return { baseUrl, path }
+  } catch {
+    return null
+  }
+}
+
 export type AiAttackStatus = 'idle' | 'starting' | 'running' | 'completed' | 'error' | 'stopping'
 
 export interface AiAttackRunState {

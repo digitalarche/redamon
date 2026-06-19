@@ -38,6 +38,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         probes: body.probes || [],
         target_model: body.target_model || '',
         api_key: body.api_key || '',
+        auth_header: body.auth_header || '',
+        auth_scheme: body.auth_scheme || '',
       }),
     })
 

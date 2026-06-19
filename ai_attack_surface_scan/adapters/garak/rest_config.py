@@ -52,13 +52,17 @@ def _body_and_field(family: str, model: str):
 
 
 def build_rest_config(target, model: str | None = None,
-                      api_key_header: str | None = None) -> dict:
+                      auth_header: str | None = None,
+                      auth_scheme: str | None = None) -> dict:
     """Build the {"rest": {"RestGenerator": {...}}} option-file dict.
 
     `model`: the target model id to send. Defaults to recon's guess; some
     servers ignore it, but OpenAI/Ollama-compat require a value.
-    `api_key_header`: if set (e.g. "Authorization"), adds `<header>: Bearer $KEY`
-    so garak injects REST_API_KEY; omit for unauthenticated targets.
+    Target auth (shared across tools): when `auth_header` is set, the header
+    carries `<scheme> $KEY` so garak injects REST_API_KEY. Examples:
+      Bearer:      auth_header="Authorization", auth_scheme="Bearer" -> "Bearer $KEY"
+      API key hdr: auth_header="x-api-key",     auth_scheme=""       -> "$KEY"
+    Omit auth_header for unauthenticated targets.
     """
     family = _family_from_target(target)
     if not model:
@@ -71,8 +75,8 @@ def build_rest_config(target, model: str | None = None,
     body, field = _body_and_field(family, model)
 
     headers = {"Content-Type": "application/json"}
-    if api_key_header:
-        headers[api_key_header] = "Bearer $KEY"
+    if auth_header:
+        headers[auth_header] = f"{auth_scheme} $KEY".strip() if auth_scheme else "$KEY"
 
     return {
         "rest": {

@@ -129,10 +129,20 @@ class TestRestConfig(unittest.TestCase):
         c = self._cfg("/v1/messages")
         self.assertEqual(c["response_json_field"], "$.content[0].text")
 
-    def test_api_key_header_injects_KEY(self):
+    def test_bearer_auth_header(self):
         t = Target(baseurl="http://h", path="/v1/chat/completions")
-        c = build_rest_config(t, model="m", api_key_header="Authorization")["rest"]["RestGenerator"]
+        c = build_rest_config(t, model="m", auth_header="Authorization", auth_scheme="Bearer")["rest"]["RestGenerator"]
         self.assertEqual(c["headers"]["Authorization"], "Bearer $KEY")
+
+    def test_custom_header_auth_no_scheme(self):
+        t = Target(baseurl="http://h", path="/v1/chat/completions")
+        c = build_rest_config(t, model="m", auth_header="x-api-key", auth_scheme="")["rest"]["RestGenerator"]
+        self.assertEqual(c["headers"]["x-api-key"], "$KEY")  # raw key, no scheme
+
+    def test_no_auth_omits_header(self):
+        t = Target(baseurl="http://h", path="/v1/chat/completions")
+        c = build_rest_config(t, model="m")["rest"]["RestGenerator"]
+        self.assertEqual(list(c["headers"].keys()), ["Content-Type"])
 
     def test_nesting_is_rest_RestGenerator(self):
         t = Target(baseurl="http://h", path="/v1/chat/completions")
