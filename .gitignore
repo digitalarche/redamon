@@ -109,6 +109,8 @@ trufflehog_scan/output/*.json
 !gvm_scan/output/.gitkeep
 !github_secret_hunt/output/.gitkeep
 !trufflehog_scan/output/.gitkeep
+# AI Attack Surface scan output (garak/pyrit/giskard/promptfoo reports + transcripts)
+ai_attack_surface_scan/output/
 
 # Nmap scan results
 *.nmap

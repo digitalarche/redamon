@@ -43,6 +43,17 @@ class RunConfig:
     # RoE confirmation gate — a launch is a confirmed action (§10).
     roe_confirmed: bool = False
     dry_run: bool = False
+    # Local Ollama judge endpoint (set by the orchestrator at spawn); the tools
+    # point their judge/grader at it for zero external egress.
+    judge_base_url: str = ""
+    # The model id the TARGET serves (for the tool's request body). Falls back to
+    # recon's ai_model_ids / ai_model_family_guess when empty.
+    target_model: str = ""
+    # Optional bearer key for an authenticated target (garak REST $KEY).
+    api_key: str = ""
+    # Optional per-tool probe/plugin override (e.g. garak probe families). Empty
+    # => the adapter's default catalog.
+    probes: list[str] = field(default_factory=list)
 
 
 def load_config() -> RunConfig:
@@ -88,4 +99,8 @@ def load_config() -> RunConfig:
         bounds=bounds,
         roe_confirmed=bool(data.get("roe_confirmed", False)),
         dry_run=bool(data.get("dry_run", False)),
+        judge_base_url=str(data.get("judge_base_url", "") or ""),
+        target_model=str(data.get("target_model", "") or ""),
+        api_key=str(data.get("api_key", "") or ""),
+        probes=data.get("probes", []) or [],
     )

@@ -1,4 +1,10 @@
-# AI Attack Surface scan — skeleton (Step 2).
-# Only the Neo4j driver for the spine. The heavy tool stack (garak, PyRIT,
-# giskard, promptfoo) is added per-adapter in later steps.
+# AI Attack Surface scan dependencies.
+# The Neo4j driver for the spine + the attack tools baked into the one image
+# (§1.2). Tools are pinned for reproducibility (the parser/TOOL_API.md is
+# written against the pinned version).
 neo4j>=5.0.0
+
+# garak (Apache-2.0) — broad single-shot LLM vulnerability scanner (Step 4).
+# Pinned: adapters/garak/TOOL_API.md + the report.jsonl parser target this exact
+# version. Pulls a large dep tree (torch/transformers) for local detectors.
+garak==0.15.1

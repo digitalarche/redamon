@@ -13,7 +13,9 @@ can pick them up, mirroring the gvm/trufflehog log conventions.
 from __future__ import annotations
 
 import logging
+import re
 import sys
+from pathlib import Path
 
 from config import load_config
 from graph import make_driver, verify_connection
@@ -27,6 +29,39 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("ai-attack-surface")
+
+
+def _safe_slug(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]", "_", text or "target")[:80]
+
+
+def run_tool(cfg, targets) -> list:
+    """Dispatch the configured tool against the targets -> list[Finding].
+
+    Each adapter is failure-soft: a tool that errors on one target yields no
+    findings for it but does not abort the run.
+    """
+    if cfg.tool == "garak":
+        from adapters.garak import run as run_garak
+        out_base = Path("/app/ai_attack_surface_scan/output") / (cfg.run_id or "dev")
+        findings = []
+        for t in targets:
+            gdir = out_base / "garak" / _safe_slug(f"{t.baseurl}{t.path}")
+            try:
+                findings.extend(run_garak(
+                    t, cfg.bounds, str(gdir), cfg.run_id,
+                    judge_base_url=cfg.judge_base_url or None,
+                    target_model=cfg.target_model or None,
+                    api_key=cfg.api_key or None,
+                    probes=cfg.probes or None,
+                ))
+            except Exception as e:  # one target failing must not abort the job
+                log.exception(f"garak failed on {t.url}: {e}")
+                print(f"    [!] garak failed on {t.url}: {e}")
+        return findings
+
+    # Default: the Step-2 skeleton (no tool) — one dummy finding per target.
+    return [make_dummy_finding(t, cfg.tool, cfg.run_id) for t in targets]
 
 
 def run() -> int:
@@ -68,13 +103,13 @@ def run() -> int:
                 print("[!] No AI targets found/selected — nothing to do")
                 return 0
 
-            # [Phase 3] Attack (skeleton: no tool, dummy findings)
-            print("[Phase 3] Attack (skeleton — no tool)")
-            findings = [make_dummy_finding(t, cfg.tool, cfg.run_id) for t in targets]
-
+            # [Phase 3] Attack
+            print(f"[Phase 3] Attack (tool={cfg.tool})")
             if cfg.dry_run:
-                print(f"    [+] dry-run: would write {len(findings)} finding(s); not persisting")
+                print("    [+] dry-run: no payloads will be sent; not persisting")
                 return 0
+            findings = run_tool(cfg, targets)
+            print(f"    [+] {len(findings)} finding(s) from {cfg.tool}")
 
             # [Phase 4] Findings -> graph
             print("[Phase 4] Findings")
