@@ -13,13 +13,15 @@ import asyncio
 import glob
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from docker.errors import NotFound
 
 import container_manager as cm
 from container_manager import ContainerManager
-from models import AiAttackSurfaceStatus
+from models import AiAttackSurfaceState, AiAttackSurfaceStatus
 
 
 def make_manager():
@@ -185,6 +187,52 @@ class TestStartStop(unittest.IsolatedAsyncioTestCase):
     async def test_running_count(self):
         await self._start()
         self.assertEqual(self.mgr.get_ai_attack_running_count(), 1)
+
+    async def test_concurrency_limit_raises(self):
+        # Fill the project to the cap with running jobs, then start one more.
+        self.mgr.ai_attack_states = {"p": {
+            f"r{i}": AiAttackSurfaceState(project_id="p", run_id=f"r{i}",
+                                          status=AiAttackSurfaceStatus.RUNNING)
+            for i in range(cm.MAX_PARALLEL_AI_ATTACK)
+        }}
+        with self.assertRaises(ValueError):
+            await self._start()
+
+    async def test_start_failure_cleans_config_file(self):
+        self.mgr.client.containers.run.side_effect = RuntimeError("docker boom")
+        state = await self._start()
+        cfg = Path(f"/tmp/redamon/ai_attack_p_{state.run_id}.json")
+        self.assertFalse(cfg.exists(), "config file must be cleaned on failed spawn")
+
+    async def test_two_tools_share_then_release_judge(self):
+        # Two tools of one scan each take a lease; first to finish releases once,
+        # the second keeps the judge alive (the shared-judge guarantee).
+        s1 = await self._start(tool="garak")
+        s2 = await self._start(tool="pyrit")
+        self.assertTrue(s1.llm_leased and s2.llm_leased)
+        self.assertEqual(self.mgr.local_llm_manager.ensure_up.call_count, 2)
+
+        self.mgr.client.containers.get.return_value = fake_container(status="exited", exit_code=0)
+        self.mgr._refresh_ai_attack_state(s1)
+        self.assertFalse(s1.llm_leased)
+        self.assertTrue(s2.llm_leased)               # sibling still holds its lease
+        self.mgr.local_llm_manager.release.assert_called_once()
+
+
+class TestGetAll(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_cleans_old_completed(self):
+        mgr = make_manager()
+        old = AiAttackSurfaceState(
+            project_id="p", run_id="r1", status=AiAttackSurfaceStatus.COMPLETED,
+            completed_at=datetime.now(timezone.utc) - timedelta(seconds=120))
+        fresh = AiAttackSurfaceState(
+            project_id="p", run_id="r2", status=AiAttackSurfaceStatus.COMPLETED,
+            completed_at=datetime.now(timezone.utc))
+        mgr.ai_attack_states = {"p": {"r1": old, "r2": fresh}}
+        runs = await mgr.get_all_ai_attack_surface_statuses("p")
+        ids = {r.run_id for r in runs}
+        self.assertNotIn("r1", ids)   # >60s old completed -> pruned
+        self.assertIn("r2", ids)
 
 
 if __name__ == "__main__":

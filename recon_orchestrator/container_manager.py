@@ -31,6 +31,11 @@ ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m|\033\[[0-9;]*m')
 # Maximum number of concurrent partial recon runs per project
 MAX_PARALLEL_PARTIAL_RECONS = 12
 
+# Maximum number of concurrent AI Attack Surface jobs per project. The four core
+# tools may run together (they share one ref-counted judge), so the cap is a
+# runaway-spawn backstop, not a typical-use limit.
+MAX_PARALLEL_AI_ATTACK = 6
+
 # Sub-container images spawned by recon (Docker-in-Docker sibling containers)
 SUB_CONTAINER_IMAGES = [
     "projectdiscovery/naabu",
@@ -1069,6 +1074,14 @@ class ContainerManager:
         """
         import json
 
+        # Concurrency backstop (raises before any state/container is created, so
+        # the route can surface it as 409 — mirrors partial recon).
+        if self._count_active_ai_attack(project_id) >= MAX_PARALLEL_AI_ATTACK:
+            raise ValueError(
+                f"Maximum {MAX_PARALLEL_AI_ATTACK} concurrent AI attack jobs reached "
+                f"for project {project_id}"
+            )
+
         run_id = str(uuid.uuid4())
         container_name = self._get_ai_attack_container_name(project_id, run_id)
         tool = run_config.get("tool", "skeleton")
@@ -1154,6 +1167,11 @@ class ContainerManager:
             state.error = str(e)
             # Don't leak the judge lease if the spawn failed after ensure_up.
             self._release_llm(state)
+            # Don't leave the config file behind on a failed spawn.
+            try:
+                Path(f"/tmp/redamon/ai_attack_{project_id}_{run_id}.json").unlink(missing_ok=True)
+            except Exception:
+                pass
             logger.error(f"Failed to start AI attack surface for {project_id}/{run_id}: {e}")
 
         return state
@@ -1235,8 +1253,10 @@ class ContainerManager:
             )
             return
 
-        current_phase: Optional[str] = "Safety / bounds"
-        current_phase_num: Optional[int] = 1
+        # Start with no phase so the first [Phase 1] marker registers as a phase
+        # start (initialising to phase 1 would swallow that transition).
+        current_phase: Optional[str] = None
+        current_phase_num: Optional[int] = None
 
         try:
             container = self.client.containers.get(state.container_id)
