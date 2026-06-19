@@ -116,6 +116,34 @@ class TestRunToolDispatch(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].baseurl, "http://b")
 
+    def test_pyrit_dispatch_isolates_and_passes_auth(self):
+        from normalizer import Finding
+        t_bad = tl.Target(baseurl="http://a", path="/c")
+        t_ok = tl.Target(baseurl="http://b", path="/c")
+        captured = {}
+
+        def fake_run(target, bounds, output_dir, run_id, **k):
+            if target.baseurl == "http://a":
+                raise RuntimeError("pyrit boom")
+            captured.update(k)
+            return [Finding(source="pyrit", chip="jailbreak", name="n", baseurl="http://b",
+                            path="/c", ai_owasp_llm_id="LLM01", ai_payload_class="pyrit-crescendo")]
+
+        cfg = _cfg(tool="pyrit")
+        cfg.probes = ["crescendo"]
+        cfg.judge_base_url = "http://localhost:11434"
+        cfg.auth_header = "Authorization"
+        cfg.auth_scheme = "Bearer"
+        cfg.api_key = "tok"
+        with patch("adapters.pyrit.run", side_effect=fake_run):
+            findings = main.run_tool(cfg, [t_bad, t_ok])
+        self.assertEqual(len(findings), 1)        # bad target isolated
+        self.assertEqual(findings[0].source, "pyrit")
+        self.assertEqual(captured["attacks"], ["crescendo"])
+        self.assertEqual(captured["judge_base_url"], "http://localhost:11434")
+        self.assertEqual(captured["auth_header"], "Authorization")
+        self.assertEqual(captured["api_key"], "tok")
+
     def test_garak_passes_probes_and_judge_through(self):
         from normalizer import Finding
         captured = {}

@@ -36,6 +36,10 @@ class TestRequestBuilding(unittest.TestCase):
         self.assertEqual(pyrit_run._v1_endpoint("http://h", None), "http://h/v1")
         self.assertEqual(pyrit_run._v1_endpoint("http://h", "/v1"), "http://h/v1")
 
+    def test_v1_endpoint_ollama_native_path(self):
+        # /api/chat isn't /v1 — fall back to the host's /v1 (Ollama serves both).
+        self.assertEqual(pyrit_run._v1_endpoint("http://h:11434", "/api/chat"), "http://h:11434/v1")
+
     def test_victim_auth_bearer_uses_api_key(self):
         api_key, headers = pyrit_run._victim_auth(
             {"auth_header": "Authorization", "auth_scheme": "Bearer", "api_key": "sk-1"})
@@ -141,6 +145,50 @@ class TestAdapterFindings(unittest.TestCase):
         self.assertEqual(f.ai_payload_class, "pyrit-crescendo")
         self.assertEqual(f.ai_oracle_kind, "judge_llm")
         self.assertAlmostEqual(f.ai_asr, 0.5)
+
+    def test_multiple_attacks_yield_multiple_findings(self):
+        from adapters.pyrit.parser import PyritReport, PyritResult
+        report = PyritReport(attack="x", pyrit_version="0.14.0", seed=0,
+                             results=[PyritResult("o", "SUCCESS", 2, "ok")])
+        with tempfile.TemporaryDirectory() as d:
+            def fake_invoke(cfg_path):
+                open(json.load(open(cfg_path))["out"], "w").close()
+                return 0, ""
+            with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
+                 patch.object(padapter, "parse_report", return_value=report):
+                findings = padapter.run(self._target(), Bounds(asr_threshold=0.3, judge_model="m"),
+                                        output_dir=d, run_id="t1", judge_base_url="http://localhost:11434",
+                                        attacks=["crescendo", "skeleton_key"])
+        self.assertEqual(len(findings), 2)
+        self.assertEqual({f.ai_payload_class for f in findings},
+                         {"pyrit-crescendo", "pyrit-skeleton-key"})
+
+    def test_no_output_file_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(padapter, "_invoke", return_value=(1, "crashed")):  # no out file
+                findings = padapter.run(self._target(), Bounds(judge_model="m"),
+                                        output_dir=d, run_id="t1", judge_base_url="http://localhost:11434",
+                                        attacks=["crescendo"])
+        self.assertEqual(findings, [])
+
+    def test_model_from_string_ai_model_ids(self):
+        # recon usually stores a list, but a bare string must not be sliced to a char.
+        t = self._target()
+        t.ai_model_ids = "qwen2.5:7b"
+        captured = {}
+        with tempfile.TemporaryDirectory() as d:
+            def cap(cfg_path):
+                cfg = json.load(open(cfg_path))
+                captured.update(cfg)
+                open(cfg["out"], "w").close()
+                return 0, ""
+            from adapters.pyrit.parser import PyritReport
+            with patch.object(padapter, "_invoke", side_effect=cap), \
+                 patch.object(padapter, "parse_report",
+                              return_value=PyritReport("crescendo", "0.14.0", 0, [])):
+                padapter.run(t, Bounds(judge_model="m"), output_dir=d, run_id="t1",
+                             judge_base_url="http://localhost:11434", attacks=["crescendo"])
+        self.assertEqual(captured["model"], "qwen2.5:7b")
 
     def test_below_threshold_no_finding(self):
         from adapters.pyrit.parser import PyritReport, PyritResult

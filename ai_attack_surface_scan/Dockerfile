@@ -15,7 +15,8 @@ LABEL description="AI Attack Surface deterministic offensive scanner for RedAmon
 
 WORKDIR /app
 
-# Build tools some tool wheels need; removed after the venvs are built.
+# Build tools some tool wheels need at install time. (Kept in the image; a future
+# optimization could strip build-essential after the venvs are built to slim it.)
 RUN apt-get update && apt-get install -y --no-install-recommends git build-essential \
     && rm -rf /var/lib/apt/lists/*
 

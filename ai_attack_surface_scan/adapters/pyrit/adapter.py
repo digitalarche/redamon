@@ -53,7 +53,9 @@ def run(target, bounds, output_dir: str, run_id: str,
     out.mkdir(parents=True, exist_ok=True)
 
     ids = getattr(target, "ai_model_ids", None)
-    model = target_model or (ids[0] if isinstance(ids, list) and ids else None) \
+    # recon stores a list; guard against a bare string (ids[0] would slice a char).
+    first_id = ids[0] if isinstance(ids, list) and ids else (ids if isinstance(ids, str) else None)
+    model = target_model or first_id \
         or getattr(target, "ai_model_family_guess", None) or "default"
 
     findings: list[Finding] = []
