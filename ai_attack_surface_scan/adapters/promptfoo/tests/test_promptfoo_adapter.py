@@ -275,7 +275,7 @@ class TestAdapterFindings(unittest.TestCase):
             PluginResult(plugin="beavertails", asr=0.5, hits=2, trials=4,
                          top_strategy="basic")])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path, gen_path, results_path, api_key):
+            def fake_invoke(cfg_path, gen_path, results_path, api_key, **_):
                 open(results_path, "w").close()   # results.json exists
                 return 0, ""
             with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
@@ -299,7 +299,7 @@ class TestAdapterFindings(unittest.TestCase):
         from adapters.promptfoo.parser import PromptfooReport
         captured = {}
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path, gen_path, results_path, api_key):
+            def fake_invoke(cfg_path, gen_path, results_path, api_key, **_):
                 with open(cfg_path) as fh:
                     captured.update(_json.load(fh))
                 open(results_path, "w").close()
@@ -317,7 +317,7 @@ class TestAdapterFindings(unittest.TestCase):
         from adapters.promptfoo.parser import PromptfooReport
         captured = {}
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(cfg_path, gen_path, results_path, api_key):
+            def fake_invoke(cfg_path, gen_path, results_path, api_key, **_):
                 with open(cfg_path) as fh:
                     captured.update(_json.load(fh))
                 open(results_path, "w").close()
@@ -334,7 +334,7 @@ class TestAdapterFindings(unittest.TestCase):
         report = PromptfooReport(plugins=[
             PluginResult(plugin="beavertails", asr=0.1, hits=1, trials=10, top_strategy="basic")])
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(c, g, r, k):
+            def fake_invoke(c, g, r, k, **_):
                 open(r, "w").close()
                 return 0, ""
             with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
@@ -356,7 +356,7 @@ class TestAdapterFindings(unittest.TestCase):
         # selecting a non-offline plugin (e.g. pii) must warn but still run
         from adapters.promptfoo.parser import PromptfooReport
         with tempfile.TemporaryDirectory() as d:
-            def fake_invoke(c, g, r, k):
+            def fake_invoke(c, g, r, k, **_):
                 open(r, "w").close()
                 return 0, ""
             with patch.object(padapter, "_invoke", side_effect=fake_invoke), \
@@ -369,9 +369,8 @@ class TestAdapterFindings(unittest.TestCase):
     def test_invoke_skips_eval_when_generate_produces_no_file(self):
         # generate fails -> gen file absent -> eval must NOT run; rc is generate's.
         with tempfile.TemporaryDirectory() as d, \
-             patch.object(padapter.subprocess, "run") as mrun:
-            from types import SimpleNamespace
-            mrun.return_value = SimpleNamespace(returncode=7, stdout="boom", stderr="")
+             patch.object(padapter, "run_streamed") as mrun:
+            mrun.return_value = (7, "boom")
             rc, tail = padapter._invoke(os.path.join(d, "cfg.json"),
                                         os.path.join(d, "gen.json"),
                                         os.path.join(d, "out.json"), api_key=None)
@@ -383,14 +382,13 @@ class TestAdapterFindings(unittest.TestCase):
         # Egress guard: OPENAI_API_KEY stripped, offline env set, target key injected.
         with tempfile.TemporaryDirectory() as d, \
              patch.dict(os.environ, {"OPENAI_API_KEY": "leak"}), \
-             patch.object(padapter.subprocess, "run") as mrun:
-            from types import SimpleNamespace
+             patch.object(padapter, "run_streamed") as mrun:
             # generate writes the gen file so eval is reached
             gen_path = os.path.join(d, "gen.json")
-            def side(cmd, **kw):
+            def side(cmd, env=None, **kw):
                 if "generate" in cmd:
                     open(gen_path, "w").close()
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return (0, "")
             mrun.side_effect = side
             padapter._invoke(os.path.join(d, "cfg.json"), gen_path,
                              os.path.join(d, "out.json"), api_key="sk-target")

@@ -1,20 +1,24 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, KeyRound, Loader2, Play, Plus, ShieldAlert, Square, Terminal, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
+import { AlertTriangle, ArrowLeft, KeyRound, Loader2, Lock, Play, Plus, SlidersHorizontal, Square, Swords, Table2, Terminal, Trash2, X } from 'lucide-react'
 import { useProject } from '@/providers/ProjectProvider'
 import { useAiAttackSurface } from '@/hooks/useAiAttackSurface'
 import {
   ALL_CARDS, ATTACK_CHIPS, resolveAuth, splitUrl,
   type AuthMode, type ChipKey, type CustomTarget, type ToolCard,
 } from '@/lib/aiAttackSurface'
+import { WikiInfoButton } from '@/components/ui'
 import styles from './page.module.css'
+
+const CHIP_BLUE = '#3b82f6'
 
 function Chip({ chip, dim }: { chip: ChipKey; dim?: boolean }) {
   const m = ATTACK_CHIPS[chip]
   return (
     <span className={styles.chip} title={`${m.definition} (${m.owasp})`}
-          style={{ borderColor: m.color, color: m.color, opacity: dim ? 0.35 : 1 }}>
+          style={{ borderColor: CHIP_BLUE, color: CHIP_BLUE, opacity: dim ? 0.35 : 1 }}>
       {m.label}
     </span>
   )
@@ -27,7 +31,7 @@ function sevColor(sev: string): string {
 export default function AiAttackSurfacePage() {
   const { projectId } = useProject()
   const s = useAiAttackSurface(projectId)
-  const [filter, setFilter] = useState<ChipKey | null>(null)
+  const [filters, setFilters] = useState<Set<ChipKey>>(new Set())
   const [openTool, setOpenTool] = useState<string | null>(null)
 
   // garak detail-view state
@@ -40,6 +44,9 @@ export default function AiAttackSurfacePage() {
   const [judgeModel, setJudgeModel] = useState('qwen2.5:7b')
   const [maxTurns, setMaxTurns] = useState(4)
   const [seed, setSeed] = useState(0)
+  // Concurrent requests per tool (garak --parallel_attempts / promptfoo eval
+  // concurrency). Default 2 — safe for a slow/CPU target; raise for GPU.
+  const [parallelism, setParallelism] = useState(2)
   const [roeConfirmed, setRoeConfirmed] = useState(false)
   // Shared: free-text description of the target app. Lifts giskard/promptfoo/pyrit.
   const [targetPurpose, setTargetPurpose] = useState('')
@@ -68,13 +75,30 @@ export default function AiAttackSurfacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
+  // Keep the log viewport pinned to the bottom as new lines stream in.
+  const logsRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    const el = logsRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [s.logs])
+
   const hasChat = s.targets.length > 0
   const targetKey = (t: { baseUrl: string; path: string }) => `${t.baseUrl}|${t.path}`
 
   const cards = useMemo<ToolCard[]>(
-    () => (filter ? ALL_CARDS.filter((c) => c.chips.includes(filter)) : ALL_CARDS),
-    [filter],
+    () => (filters.size
+      ? ALL_CARDS.filter((c) => Array.from(filters).every((chip) => c.chips.includes(chip)))
+      : ALL_CARDS),
+    [filters],
   )
+
+  const toggleFilter = (k: ChipKey) =>
+    setFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
 
   const toggle = (set: Set<string>, key: string, apply: (s: Set<string>) => void) => {
     const next = new Set(set)
@@ -100,6 +124,11 @@ export default function AiAttackSurfacePage() {
 
   // The tool whose detail view is open (garak / pyrit / …).
   const openCard = ALL_CARDS.find((c) => c.id === openTool && c.available) || null
+  // Probes the operator can actually run: families needing a capability our
+  // black-box HTTP chat target lacks (`requires`) are excluded from the count,
+  // the grid and Select-all. (Inactive-by-default garak families that would
+  // abort the run are dropped from the catalog entirely, not just hidden.)
+  const runnableProbes = openCard ? openCard.probes.filter((p) => !p.requires) : []
 
   // The card's default probe selection: families flagged `default`, else its first.
   const defaultProbeIds = (card: ToolCard): string[] => {
@@ -129,7 +158,7 @@ export default function AiAttackSurfacePage() {
     await s.launch({
       tool: openCard.id,
       targets: [...graphTargets, ...custom],
-      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns, seed },
+      bounds: { trials, asr_threshold: asrThreshold, judge_model: judgeModel, max_turns: maxTurns, seed, parallelism },
       roe_confirmed: roeConfirmed,
       probes: Array.from(selectedProbes),
       strategies: openCard.id === 'promptfoo' ? Array.from(selectedStrategies) : undefined,
@@ -147,11 +176,24 @@ export default function AiAttackSurfacePage() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}><ShieldAlert size={22} /> AI Attack Surface</h1>
+          <h1 className={styles.title}><Swords size={22} /> AI Gauntlet</h1>
           <p className={styles.subtitle}>
             Deterministic offensive testing of the AI surface recon discovered.
             <span className={styles.discovered}> {s.targets.length} LLM endpoint(s) discovered</span>
           </p>
+        </div>
+        <div className={styles.headerActions}>
+          <WikiInfoButton
+            target="https://github.com/samugit83/redamon/wiki/AI-Gauntlet"
+            title="Open the AI Gauntlet wiki"
+            size={16}
+          />
+          <Link href="/graph?table=aiRisk&sheet=testedVulns" className={styles.showFindings}>
+            <Table2 size={14} /> Show findings
+          </Link>
+          <Link href="/graph" className={styles.backBtn}>
+            <ArrowLeft size={14} /> Back to Red Zone
+          </Link>
         </div>
       </div>
 
@@ -160,12 +202,17 @@ export default function AiAttackSurfacePage() {
         <span className={styles.filterLabel}>Filter by attack:</span>
         {(Object.keys(ATTACK_CHIPS) as ChipKey[]).map((k) => (
           <button key={k} type="button"
-                  className={`${styles.filterChip} ${filter === k ? styles.filterChipActive : ''}`}
-                  style={{ borderColor: ATTACK_CHIPS[k].color, color: ATTACK_CHIPS[k].color }}
-                  onClick={() => setFilter(filter === k ? null : k)}>
+                  className={`${styles.filterChip} ${filters.has(k) ? styles.filterChipActive : ''}`}
+                  style={{ borderColor: CHIP_BLUE, color: CHIP_BLUE }}
+                  onClick={() => toggleFilter(k)}>
             {ATTACK_CHIPS[k].label}
           </button>
         ))}
+        {filters.size > 0 && (
+          <button type="button" className={styles.filterClear} onClick={() => setFilters(new Set())}>
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Card grid */}
@@ -174,12 +221,19 @@ export default function AiAttackSurfacePage() {
           // Greyed only when the tool isn't shipped. Even with no discovered
           // endpoint the card opens, so an operator can add a custom target.
           const greyed = !card.available
+          // This tool's scan is in flight -> show a spinner and block (re)launch.
+          const isRunning = running && s.run?.tool === card.id
+          // While ANY scan runs, lock every OTHER tool: opening its config would
+          // show that tool's settings next to the running tool's logs (confusing),
+          // and only one scan can run at a time anyway.
+          const lockedByRun = running && !isRunning
           return (
-            <div key={card.id} className={`${styles.card} ${greyed ? styles.cardGreyed : ''}`}>
-              <div className={styles.cardChips}>
-                {card.chips.map((c) => <Chip key={c} chip={c} dim={filter ? c !== filter : false} />)}
-              </div>
-              <div className={styles.cardName}>{card.name}
+            <div key={card.id} className={`${styles.card} ${greyed ? styles.cardGreyed : ''} ${isRunning ? styles.cardRunning : ''} ${lockedByRun ? styles.cardLocked : ''}`}>
+              <div className={styles.cardName}>
+                <span className={styles.cardNameText}>
+                  {card.name}
+                  {isRunning && <Loader2 size={15} className={styles.spin} />}
+                </span>
                 <span className={styles.cardStyle}>{card.style}</span>
               </div>
               <div className={styles.cardPurpose}>{card.purpose}</div>
@@ -187,16 +241,29 @@ export default function AiAttackSurfacePage() {
                 <span className={styles.requires}>
                   Requires: {card.requires}{!hasChat && card.available ? ' (none found)' : ''}
                 </span>
-                <span className={styles.license}>{card.license}</span>
               </div>
-              <div className={styles.cardActions}>
-                {!card.available && <span className={styles.soon}>coming soon</span>}
-                {card.available && (
-                  <button type="button" className={styles.launchBtn} disabled={greyed}
-                          onClick={() => openConfig(card)}>
-                    {openTool === card.id ? 'Close' : 'Configure'}
-                  </button>
-                )}
+              <div className={styles.cardFooter}>
+                <div className={styles.cardChips}>
+                  {card.chips.map((c) => <Chip key={c} chip={c} dim={filters.size > 0 && !filters.has(c)} />)}
+                </div>
+                <div className={styles.cardActions}>
+                  {!card.available && <span className={styles.soon}>coming soon</span>}
+                  {card.available && (
+                    <button type="button"
+                            className={`${styles.launchBtn} ${openTool === card.id ? styles.launchBtnOpen : ''}`}
+                            disabled={greyed || lockedByRun}
+                            title={lockedByRun ? 'A scan is running — stop it to configure another tool' : undefined}
+                            onClick={() => openConfig(card)}>
+                      {isRunning
+                        ? <><Loader2 size={14} className={styles.spin} /> Running…</>
+                        : lockedByRun
+                          ? <><Lock size={14} /> Locked</>
+                          : openTool === card.id
+                            ? <><X size={14} /> Close</>
+                            : <><SlidersHorizontal size={14} /> Configure &amp; launch</>}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )
@@ -260,11 +327,13 @@ export default function AiAttackSurfacePage() {
           {/* 2. Probes / strategies (tool-specific) */}
           <section className={styles.block}>
             <h3 className={styles.blockTitle}>2. {openCard.style === 'multi-turn' ? 'Attack strategies' : 'Probes'}</h3>
-            {openCard.probes.length > 6 && (
+            {/* Probes needing a capability our black-box HTTP chat target can't
+                offer (they would only ever return zero findings) are hidden. */}
+            {runnableProbes.length > 6 && (
               <div className={styles.probeToolbar}>
-                <span className={styles.probeCount}>{selectedProbes.size} / {openCard.probes.length} selected</span>
+                <span className={styles.probeCount}>{selectedProbes.size} / {runnableProbes.length} selected</span>
                 <button type="button" className={styles.probeToolBtn}
-                        onClick={() => setSelectedProbes(new Set(openCard.probes.filter((p) => !p.requires).map((p) => p.id)))}>
+                        onClick={() => setSelectedProbes(new Set(runnableProbes.map((p) => p.id)))}>
                   Select all
                 </button>
                 <button type="button" className={styles.probeToolBtn}
@@ -278,10 +347,11 @@ export default function AiAttackSurfacePage() {
               </div>
             )}
             <div className={styles.probeGrid}>
-              {openCard.probes.map((p) => {
+              {runnableProbes.map((p) => {
                 const on = selectedProbes.has(p.id)
                 // Probes needing a capability our black-box HTTP chat target can't
-                // offer are disabled — they would only ever return zero findings.
+                // offer are disabled (they would only ever return zero findings) but
+                // stay visible so the operator sees why they are unavailable.
                 const blocked = Boolean(p.requires)
                 return (
                   <label key={p.id}
@@ -291,10 +361,11 @@ export default function AiAttackSurfacePage() {
                            onChange={() => toggle(selectedProbes, p.id, setSelectedProbes)} />
                     <span className={styles.probeBody}>
                       <span className={styles.probeName}>
-                        {p.label}<Chip chip={p.chip} />
+                        {p.label}
                         {blocked && <span className={styles.probeBadge}>needs {p.requires}</span>}
                       </span>
                       <span className={styles.probeDesc}>{p.description}</span>
+                      <span className={styles.probeChip}><Chip chip={p.chip} /></span>
                     </span>
                   </label>
                 )
@@ -304,7 +375,7 @@ export default function AiAttackSurfacePage() {
               {openCard.style === 'multi-turn'
                 ? 'Each strategy runs bounded multi-turn objectives via the local judge.'
                 : 'Selecting a family runs all of its sub-probes; whole families can be slow on CPU. '
-                  + 'Some families (audio, visual_jailbreak, suffix/GCG, glitch) need a multimodal target or model internals.'}
+                  + 'Probes needing a multimodal target or model internals are disabled for black-box HTTP chat targets.'}
             </p>
           </section>
 
@@ -325,6 +396,9 @@ export default function AiAttackSurfacePage() {
               <label title="RNG seed — part of the reproducibility envelope (garak / pyrit)">
                 Seed<input type="number" min={0} value={seed}
                      onChange={(e) => setSeed(parseInt(e.target.value) || 0)} /></label>
+              <label title="How many requests are fired at the target at once. Keep low (2) for a slow/CPU target so its queue doesn't time out; raise it for a fast/GPU target.">
+                Parallel<input type="number" min={1} max={16} value={parallelism}
+                     onChange={(e) => setParallelism(Math.max(1, Math.min(16, parseInt(e.target.value) || 1)))} /></label>
             </div>
 
             {/* promptfoo: payload-mutation strategies (local, zero-egress). */}
@@ -404,8 +478,10 @@ export default function AiAttackSurfacePage() {
                 {s.launching ? <Loader2 size={14} className={styles.spin} /> : <Play size={14} />} Launch {openCard.name}
               </button>
               {running && (
-                <button type="button" className={styles.stop} onClick={s.stop}>
-                  <Square size={14} /> Stop
+                <button type="button" className={styles.stop} onClick={s.stop} disabled={s.stopping}>
+                  {s.stopping
+                    ? <><Loader2 size={14} className={styles.spin} /> Stopping…</>
+                    : <><Square size={14} /> Stop</>}
                 </button>
               )}
               {s.error && <span className={styles.err}>{s.error}</span>}
@@ -414,7 +490,15 @@ export default function AiAttackSurfacePage() {
 
           {/* 4. Output */}
           <section className={styles.block}>
-            <h3 className={styles.blockTitle}><Terminal size={14} /> 4. Output</h3>
+            <h3 className={styles.blockTitle}>
+              <Terminal size={14} /> 4. Output
+              {running && (
+                <span className={styles.scanning}>
+                  <Loader2 size={13} className={styles.spin} /> scanning…
+                </span>
+              )}
+            </h3>
+            {running && <div className={styles.scanBar} aria-hidden="true" />}
             {s.run && (
               <div className={styles.status}>
                 Status: <strong>{s.run.status}</strong>
@@ -422,7 +506,7 @@ export default function AiAttackSurfacePage() {
               </div>
             )}
             {s.logs.length > 0 && (
-              <pre className={styles.logs}>
+              <pre className={styles.logs} ref={logsRef}>
                 {s.logs.map((l, i) => (
                   <div key={i} className={styles[`log_${l.level}`] || styles.log_info}>{l.log}</div>
                 ))}
@@ -435,7 +519,10 @@ export default function AiAttackSurfacePage() {
       {/* Findings table */}
       <div className={styles.findings}>
         <h2 className={styles.detailTitle}>Findings ({s.findings.length})</h2>
-        {s.findings.length === 0 && <p className={styles.muted}>No AI Attack Surface findings yet.</p>}
+        {s.findings.length === 0 && <p className={styles.muted}>No AI Gauntlet findings yet.</p>}
+        <Link href="/graph?table=aiRisk&sheet=testedVulns" className={`${styles.showFindings} ${styles.findingsCta}`}>
+          <Table2 size={14} /> Show findings in Red Zone
+        </Link>
         {s.findings.length > 0 && (
           <table className={styles.table}>
             <thead>

@@ -67,6 +67,21 @@
   line-height: 1;
 }
 
+/* "New!" badge on the AI Attack Surface tab */
+.newBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+
 /* -- Filter Group (create + select as unified element) -- */
 
 .filterGroup {

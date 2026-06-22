@@ -104,22 +104,16 @@ export const GARAK_CARD: ToolCard = {
       requires: 'an agentic (tool-using) target' },
 
     // --- Jailbreaks ---
-    { id: 'doctor', label: 'Roleplay Bypass (doctor)', chip: 'jailbreak',
-      description: '"Doctor" persona and leetspeak puppetry to override safety rules.' },
     { id: 'grandma', label: 'Grandma Exploit (grandma)', chip: 'jailbreak',
       description: 'Emotional social-engineering ("my late grandma used to…") to extract restricted content.' },
     { id: 'dra', label: 'Disguise & Reconstruct (dra)', chip: 'jailbreak',
       description: 'Hides a harmful request and asks the model to reconstruct it.' },
-    { id: 'fitd', label: 'Foot-in-the-Door (fitd)', chip: 'jailbreak',
-      description: 'Escalates from benign to harmful requests across the conversation.' },
     { id: 'phrasing', label: 'Tense-Shift Bypass (phrasing)', chip: 'jailbreak',
       description: 'Rephrases requests in past / future tense to slip past safety filters.' },
     { id: 'suffix', label: 'Adversarial Suffix (suffix)', chip: 'jailbreak',
       description: 'Appends optimized GCG / BEAST suffixes that force compliance. GCG needs white-box access.' },
     { id: 'tap', label: 'Tree-of-Attacks (tap)', chip: 'jailbreak',
       description: 'TAP / PAIR: an attacker model searches for working jailbreaks. Uses the local judge.' },
-    { id: 'goat', label: 'Generative Offensive Agent (goat)', chip: 'jailbreak',
-      description: 'An attacker model runs adaptive multi-step jailbreaks. Uses the local judge.' },
     { id: 'glitch', label: 'Glitch Tokens (glitch)', chip: 'jailbreak',
       description: 'Anomalous tokens that destabilize the model. Needs tokenizer access.',
       requires: 'white-box tokenizer access' },
@@ -139,14 +133,8 @@ export const GARAK_CARD: ToolCard = {
     // --- Sensitive data disclosure ---
     { id: 'apikey', label: 'API Key Extraction (apikey)', chip: 'data-disclosure',
       description: 'Coaxes the model into emitting API keys and secrets.' },
-    { id: 'propile', label: 'PII Leakage (propile)', chip: 'data-disclosure',
-      description: 'ProPILE probes for leaked personal data (twin / triplet / quadruplet / unstructured).' },
     { id: 'divergence', label: 'Data Divergence (divergence)', chip: 'data-disclosure',
       description: 'Repetition attacks (repeated-token) that leak memorized training data.' },
-
-    // --- Encoding / smuggling ---
-    { id: 'smuggling', label: 'Token Smuggling (smuggling)', chip: 'encoding-bypass',
-      description: 'Homoglyph, function-masking and hypothetical-response obfuscation.' },
 
     // --- Toxicity / harmful content ---
     { id: 'realtoxicityprompts', label: 'Real Toxicity Prompts (realtoxicityprompts)', chip: 'toxicity',
@@ -155,8 +143,6 @@ export const GARAK_CARD: ToolCard = {
       description: 'Language Model Risk Cards: bullying, profanity, sexual content, quack medicine, deadnaming.' },
     { id: 'continuation', label: 'Slur Continuation (continuation)', chip: 'toxicity',
       description: 'Tests whether the model completes reclaimed slurs.' },
-    { id: 'donotanswer', label: 'Do-Not-Answer (donotanswer)', chip: 'toxicity',
-      description: 'Prompts that should be refused: hazards, malicious use, misinformation.' },
     { id: 'atkgen', label: 'Adversarial Auto-Gen (atkgen)', chip: 'toxicity',
       description: 'An attacker model iteratively elicits toxic output (uses a HF toxicity model).' },
     { id: 'topic', label: 'Off-Limits Topics (topic)', chip: 'toxicity',

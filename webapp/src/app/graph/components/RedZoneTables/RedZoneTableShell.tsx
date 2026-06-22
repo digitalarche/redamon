@@ -27,6 +27,9 @@ interface RedZoneTableShellProps {
   filteredRowCount: number
   emptyLabel?: string
   noMatchLabel?: string
+  /** Always-visible controls (e.g. a sheet/tab selector) shown above the body
+   * in every state, so navigation never disappears when a sheet is empty. */
+  toolbar?: ReactNode
   children: ReactNode
 }
 
@@ -45,6 +48,7 @@ export const RedZoneTableShell = memo(function RedZoneTableShell({
   filteredRowCount,
   emptyLabel = 'No findings yet. Run a recon scan to populate this table.',
   noMatchLabel = 'No rows match your search.',
+  toolbar,
   children,
 }: RedZoneTableShellProps) {
   const [exporting, setExporting] = useState<'csv' | 'json' | 'md' | null>(null)
@@ -133,6 +137,7 @@ export const RedZoneTableShell = memo(function RedZoneTableShell({
       </div>
 
       <div className={styles.body}>
+        {toolbar}
         {isLoading ? (
           <div className={styles.stateContainer}>
             <Loader2 size={24} className={styles.spinner} />

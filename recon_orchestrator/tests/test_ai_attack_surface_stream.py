@@ -52,6 +52,34 @@ class TestStreamLogs(unittest.IsolatedAsyncioTestCase):
         # High-water mark recorded for SSE reconnect resume.
         self.assertIsNotNone(mgr.ai_attack_states["p"]["r"].last_log_timestamp)
 
+    async def test_replays_full_history_on_reconnect(self):
+        # Statefulness: even when a prior stream set last_log_timestamp (i.e. this
+        # is a page-refresh reconnect), the stream must replay from the START
+        # (no `since` filter) so the client restores the full log history.
+        from datetime import datetime, timezone
+        mgr = make_manager()
+        state = AiAttackSurfaceState(project_id="p", run_id="r",
+                                     status=AiAttackSurfaceStatus.RUNNING,
+                                     container_id="c0ffee")
+        state.last_log_timestamp = datetime(2026, 6, 19, 13, 0, 2, tzinfo=timezone.utc)
+        mgr.ai_attack_states = {"p": {"r": state}}
+
+        container = MagicMock()
+        container.status = "running"
+        container.logs.return_value = iter([
+            b"2026-06-19T13:00:00.000000000Z [Phase 1] Safety / bounds",
+            b"2026-06-19T13:00:01.000000000Z [Phase 2] Target loading",
+            b"2026-06-19T13:00:02.000000000Z [Phase 3] Attack (skeleton)",
+            b"2026-06-19T13:00:03.000000000Z [Phase 4] Findings",
+        ])
+        mgr.client.containers.get.return_value = container
+
+        events = await _collect(mgr.stream_ai_attack_surface_logs("p", "r"))
+        # full history replayed despite last_log_timestamp being set
+        self.assertEqual([e.phase_number for e in events if e.is_phase_start], [1, 2, 3, 4])
+        # and the read must NOT be filtered by `since`
+        self.assertNotIn("since", container.logs.call_args.kwargs)
+
     async def test_no_container_id_yields_notice(self):
         mgr = make_manager()
         state = AiAttackSurfaceState(project_id="p", run_id="r",

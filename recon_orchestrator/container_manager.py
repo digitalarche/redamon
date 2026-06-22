@@ -1194,16 +1194,22 @@ class ContainerManager:
 
         return state
 
-    async def stop_ai_attack_surface(self, project_id: str, run_id: str, timeout: int = 10) -> AiAttackSurfaceState:
+    async def stop_ai_attack_surface(self, project_id: str, run_id: str, timeout: int = 2) -> AiAttackSurfaceState:
         state = await self.get_ai_attack_surface_status(project_id, run_id)
 
         if state.status in (AiAttackSurfaceStatus.RUNNING, AiAttackSurfaceStatus.STARTING):
             state.status = AiAttackSurfaceStatus.STOPPING
             if state.container_id:
-                try:
-                    container = self.client.containers.get(state.container_id)
+                # Run the blocking docker stop/remove off the event loop so the
+                # stop request (and concurrent status polls) stay responsive. A
+                # short SIGTERM grace keeps the operator from waiting ~10s — a
+                # red-team scan has no graceful-shutdown work worth waiting for.
+                def _kill(cid: str):
+                    container = self.client.containers.get(cid)
                     container.stop(timeout=timeout)
                     container.remove()
+                try:
+                    await asyncio.to_thread(_kill, state.container_id)
                     state.status = AiAttackSurfaceStatus.IDLE
                     state.completed_at = datetime.now(timezone.utc)
                     logger.info(f"Stopped AI attack container for {project_id}/{run_id}")
@@ -1300,15 +1306,13 @@ class ContainerManager:
             log_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
             loop = asyncio.get_running_loop()
 
-            since_ts = None
-            if state.last_log_timestamp is not None:
-                since_ts = state.last_log_timestamp + timedelta(microseconds=1)
-
+            # Always replay from the start of the container's logs on every
+            # (re)connect, so a page refresh restores the FULL status + phase +
+            # log history (the client resets its log view on stream open to avoid
+            # duplicates). This makes a running scan stateful across reloads.
             def read_logs():
                 try:
                     log_stream_kwargs = {"stream": True, "follow": True, "timestamps": True}
-                    if since_ts is not None:
-                        log_stream_kwargs["since"] = since_ts
                     for line in container.logs(**log_stream_kwargs):
                         asyncio.run_coroutine_threadsafe(log_queue.put(line), loop).result(timeout=5)
                         try:

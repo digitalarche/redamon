@@ -19,6 +19,8 @@ interface MultiSheetProps {
   slug: 'aiSurface' | 'aiRisk'
   title: string
   sheets: SheetDef[]
+  /** Sheet key to pre-select (e.g. when deep-linked). Falls back to sheets[0]. */
+  initialSheet?: string | null
 }
 
 function renderCell(kind: CellKind, value: unknown, max?: number) {
@@ -33,11 +35,13 @@ function renderCell(kind: CellKind, value: unknown, max?: number) {
   }
 }
 
-const MultiSheetTable = memo(function MultiSheetTable({ projectId, slug, title, sheets }: MultiSheetProps) {
+const MultiSheetTable = memo(function MultiSheetTable({ projectId, slug, title, sheets, initialSheet }: MultiSheetProps) {
   const [data, setData] = useState<{ sheets: Record<string, unknown[]> } | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [active, setActive] = useState(sheets[0].key)
+  const [active, setActive] = useState(
+    sheets.some(s => s.key === initialSheet) ? (initialSheet as string) : sheets[0].key,
+  )
   const [search, setSearch] = useState('')
 
   const fetchData = useMemo(() => async () => {
@@ -85,27 +89,29 @@ const MultiSheetTable = memo(function MultiSheetTable({ projectId, slug, title, 
       rowCount={allRows.length}
       filteredRowCount={filtered.length}
       emptyLabel={sheet.empty}
+      toolbar={(
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '8px 4px' }}>
+          {sheets.map(s => {
+            const n = counts[s.key]?.length ?? 0
+            const isActive = s.key === active
+            return (
+              <button
+                key={s.key}
+                onClick={() => { setActive(s.key); setSearch('') }}
+                style={{
+                  fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                  border: '1px solid ' + (isActive ? '#f59e0b' : 'rgba(255,255,255,0.15)'),
+                  background: isActive ? 'rgba(245,158,11,0.15)' : 'transparent',
+                  color: isActive ? '#f59e0b' : 'inherit', fontWeight: isActive ? 600 : 400,
+                }}
+              >
+                {s.label} <span style={{ opacity: 0.6 }}>({n})</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     >
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '8px 4px' }}>
-        {sheets.map(s => {
-          const n = counts[s.key]?.length ?? 0
-          const isActive = s.key === active
-          return (
-            <button
-              key={s.key}
-              onClick={() => { setActive(s.key); setSearch('') }}
-              style={{
-                fontSize: 12, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-                border: '1px solid ' + (isActive ? '#f59e0b' : 'rgba(255,255,255,0.15)'),
-                background: isActive ? 'rgba(245,158,11,0.15)' : 'transparent',
-                color: isActive ? '#f59e0b' : 'inherit', fontWeight: isActive ? 600 : 400,
-              }}
-            >
-              {s.label} <span style={{ opacity: 0.6 }}>({n})</span>
-            </button>
-          )
-        })}
-      </div>
       <table className={rowStyles.table}>
         <thead>
           <tr>{sheet.columns.map(c => <th key={c.key}>{c.header}</th>)}</tr>
@@ -227,8 +233,8 @@ const AI_RISK_SHEETS: SheetDef[] = [
       { key: 'serverName', header: 'Server', kind: 'text' },
       { key: 'toolCount', header: 'Tools', kind: 'num' },
     ] },
-  { key: 'testedVulns', label: 'Tested Vulnerabilities',
-    empty: 'No AI Attack Surface findings yet. Run a garak / PyRIT / giskard / promptfoo scan.',
+  { key: 'testedVulns', label: 'AI Gauntlet Vulnerabilities',
+    empty: 'No AI Gauntlet findings yet. Run a garak / PyRIT / giskard / promptfoo scan.',
     columns: [
       { key: 'severity', header: 'Severity', kind: 'sev' },
       { key: 'owasp', header: 'OWASP-LLM', kind: 'text' },
@@ -247,6 +253,6 @@ export const AiSurfaceTable = memo(function AiSurfaceTable({ projectId }: Props)
   return <MultiSheetTable projectId={projectId} slug="aiSurface" title="AI / LLM Attack Surface" sheets={AI_SURFACE_SHEETS} />
 })
 
-export const AiRiskTable = memo(function AiRiskTable({ projectId }: Props) {
-  return <MultiSheetTable projectId={projectId} slug="aiRisk" title="AI Risk (OWASP-LLM / ATLAS)" sheets={AI_RISK_SHEETS} />
+export const AiRiskTable = memo(function AiRiskTable({ projectId, initialSheet }: Props & { initialSheet?: string | null }) {
+  return <MultiSheetTable projectId={projectId} slug="aiRisk" title="AI Risk (OWASP-LLM / ATLAS)" sheets={AI_RISK_SHEETS} initialSheet={initialSheet} />
 })

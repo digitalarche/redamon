@@ -12,10 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 from pathlib import Path
 
 from normalizer import Finding
+from proc import run_streamed
 
 from .parser import parse_report
 from .plugins import (DEFAULT_PLUGINS, DEFAULT_STRATEGIES, LOCAL_STRATEGIES,
@@ -109,7 +109,8 @@ def run(target, bounds, output_dir: str, run_id: str,
     results_path = out / "promptfoo_results.json"
     cfg_path.write_text(json.dumps(cfg, indent=2))
 
-    rc, tail = _invoke(cfg_path, gen_path, results_path, api_key)
+    rc, tail = _invoke(cfg_path, gen_path, results_path, api_key,
+                       parallel_attempts=max(1, int(getattr(bounds, "parallelism", 2) or 2)))
     if not os.path.exists(results_path):
         logger.warning(f"promptfoo produced no results (rc={rc}); tail:\n{tail}")
         return []
@@ -150,8 +151,11 @@ def run(target, bounds, output_dir: str, run_id: str,
     return findings
 
 
-def _invoke(cfg_path, gen_path, results_path, api_key):
-    """Run the promptfoo 2-step. Returns (rc, log tail). Failure-soft."""
+def _invoke(cfg_path, gen_path, results_path, api_key, parallel_attempts=2):
+    """Run the promptfoo 2-step. Returns (rc, log tail). Failure-soft.
+
+    `parallel_attempts` caps how many test cases eval runs concurrently against
+    the target (promptfoo -j) — keep it low for a slow/CPU target."""
     env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}
     env.update(_OFFLINE_ENV)
     if api_key:
@@ -161,16 +165,10 @@ def _invoke(cfg_path, gen_path, results_path, api_key):
     gen = [PROMPTFOO_BIN, "redteam", "generate", "-c", str(cfg_path),
            "-o", str(gen_path), "--no-progress-bar"]
     ev = [PROMPTFOO_BIN, "eval", "-c", str(gen_path), "-o", str(results_path),
-          "--no-table", "--no-progress-bar"]
-    try:
-        logger.info(f"Running promptfoo generate: {' '.join(gen)}")
-        p1 = subprocess.run(gen, capture_output=True, text=True,
-                            timeout=DEFAULT_TIMEOUT, env=env)
-        if not os.path.exists(gen_path):
-            return p1.returncode, (p1.stdout or "")[-1500:] + (p1.stderr or "")[-1500:]
-        logger.info(f"Running promptfoo eval: {' '.join(ev)}")
-        p2 = subprocess.run(ev, capture_output=True, text=True,
-                            timeout=DEFAULT_TIMEOUT, env=env)
-        return p2.returncode, (p2.stdout or "")[-1500:] + (p2.stderr or "")[-1500:]
-    except subprocess.TimeoutExpired:
-        return -1, f"TIMEOUT after {DEFAULT_TIMEOUT}s"
+          "--no-table", "--no-progress-bar", "-j", str(max(1, int(parallel_attempts)))]
+    logger.info(f"Running promptfoo generate: {' '.join(gen)}")
+    rc1, tail1 = run_streamed(gen, env=env, timeout=DEFAULT_TIMEOUT, tag="promptfoo:gen")
+    if not os.path.exists(gen_path):
+        return rc1, tail1
+    logger.info(f"Running promptfoo eval: {' '.join(ev)}")
+    return run_streamed(ev, env=env, timeout=DEFAULT_TIMEOUT, tag="promptfoo:eval")

@@ -25,6 +25,11 @@ class Bounds:
     # RNG seed for tools that support it (garak --seed, pyrit) — part of the
     # reproducibility envelope. Default 0 (deterministic baseline).
     seed: int = 0
+    # How many requests a tool fires at the target concurrently (garak
+    # --parallel_attempts; promptfoo eval concurrency). Default 2 — low enough
+    # that a single-CPU victim's queue doesn't back up past the request timeout,
+    # high enough to make progress. Raise it for a fast/GPU target.
+    parallelism: int = 2
     # Hard guardrail floor — categories blocked before any payload leaves the
     # container, regardless of other settings (§10). Read-only floor.
     hard_blocked_categories: list[str] = field(
@@ -108,6 +113,8 @@ def load_config() -> RunConfig:
         judge_model=str(bounds_data.get("judge_model", "")),
         max_turns=int(bounds_data.get("max_turns", 4)),
         seed=int(bounds_data.get("seed", 0) or 0),
+        # Clamp to a sane range so a stray value can't hammer or stall the target.
+        parallelism=max(1, min(16, int(bounds_data.get("parallelism", 2) or 2))),
     )
 
     return RunConfig(

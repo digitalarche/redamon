@@ -21,11 +21,12 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v4.15.1-release-2E8B57?style=flat" alt="Version 4.15.1"/>
+  <img height="24" src="https://img.shields.io/badge/v5.0.0-release-2E8B57?style=flat" alt="Version 5.0.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
   <img height="24" src="https://img.shields.io/badge/AI-AUTONOMOUS%20AGENT-6A5ACD?style=flat&logo=openai&logoColor=white" alt="AI Powered"/>
+  <a href="https://github.com/samugit83/redamon/wiki/AI-Gauntlet"><img height="24" src="https://img.shields.io/badge/%F0%9F%86%95%20AI%20GAUNTLET-OFFENSIVE%20AI%20TESTING-FF6B35?style=flat" alt="AI Gauntlet — Offensive AI Testing"/></a>
   <a href="https://github.com/samugit83/redamon/wiki/Fireteam-Parallel-Specialists"><img height="24" src="https://img.shields.io/badge/%F0%9F%94%A5%20FIRETEAM-PARALLEL%20MULTI--AGENT-7C3AED?style=flat" alt="Fireteam Parallel Multi-Agent"/></a>
   <img height="24" src="https://img.shields.io/badge/CONFIGURABLE-AUTONOMY-CC7722?style=flat" alt="Configurable Autonomy"/>
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
@@ -439,6 +440,10 @@ Everything runs on a **fan-out / fan-in** architecture: each phase fires as many
 | | **Framework Fingerprinting** | 12 built-in + custom signatures | Passive | Per JS file |
 | | **DOM Sink Detection** | 17 XSS/prototype pollution patterns | Passive | Per JS file |
 | **AI Surface Recon** | **AI/LLM/MCP/Vector-DB Fingerprinting** | Active confirmation of the surfaces the classifier flagged — chat-shape probes (dialect/streaming/latency), MCP handshake + `tools/list` + Cisco YARA tool-poisoning scan, OpenAPI/model-listing discovery, Julius YAML probe-pack engine, vector-DB confirmation reads (qdrant/chroma/weaviate/milvus). Writes `Endpoint.ai_*` / `ai_mcp_*`, `Parameter.is_ai_prompt_injectable`, confirmed `Technology(ai-*)`, and MCP tool-poisoning `Vulnerability` nodes | Active (benign, no LLM calls) | Hosts parallel, workloads sequential (GROUP 5c / Phase 4.5) |
+| **AI Gauntlet** | **Broad LLM Scan** | garak — 40 probe families (prompt injection, DAN jailbreaks, encoding bypass, data-leak replay, system-prompt extraction, toxicity, malware / exploit generation, package hallucination) | Active (offensive) | Offensive follow-up to recon; one-shot per probe, ASR per family, local-judge graded |
+| | **Multi-Turn Jailbreaks** | PyRIT — bounded conversational attacks (crescendo, skeleton-key, TAP, many-shot) | Active (offensive) | Multi-turn escalation, local attacker / judge model |
+| | **Quality + Safety Scan** | Giskard — app-tailored detectors (prompt injection, information disclosure, hallucination, harmfulness, stereotypes, sycophancy, output formatting) | Active (offensive) | Test set generated from the app purpose, local judge |
+| | **Red-Team Eval** | promptfoo — public attack datasets (Pliny, BeaverTails, HarmBench) + encoding strategies (base64, rot13, leetspeak, morse, pig latin) | Active (offensive) | Dataset eval, ASR per plugin, local judge |
 | **Vulnerability Scanning** | **Vulnerability Scanning** | Nuclei (9,000+ templates + DAST + custom template upload) | Active | Parallel with GraphQL Scan + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
 | **GraphQL Security** | **GraphQL Security Testing** | Endpoint discovery, introspection test, schema extraction, sensitive-field detection, graphql-cop (12 misconfig checks: alias/batch/directive DoS, GraphiQL, trace mode, GET/POST CSRF, field suggestions) | Active / Passive | Parallel with Nuclei + Subdomain Takeover + VHost & SNI (GROUP 6 Phase A) |
 | **Subdomain Takeover** | **Subdomain Takeover Detection** | Subjack (Apache-2.0 DNS-first fingerprints) + Nuclei takeover templates (`http/takeovers/` + `dns/`) + BadDNS (AGPL-3.0 isolated sidecar: CNAME, NS, MX, TXT, SPF, DMARC, wildcard, NSEC, references, zonetransfer). Cross-tool dedup, 12+ auto-exploitable providers, confidence-scored `confirmed` / `likely` / `manual_review` verdicts | Active / Passive | Parallel with Nuclei + GraphQL Scan + VHost & SNI (GROUP 6 Phase A) |
@@ -460,6 +465,14 @@ Run **any single tool** from the pipeline independently without re-running the e
 Optional **LLM-augmented decision points** wired inside the recon pipeline where static look-ups historically drift -- **Nuclei** prunes its tag list to the detected tech stack, the **WAF classifier** catches header-stripped Cloudflare/AWS WAF/Imperva, and many others across FFuf, Nuclei false-positive filtering, and subdomain-takeover disambiguation. Each hook is a **cascade fallback** after the static path with a deterministic safe fallback, so an LLM outage cannot break a scan. One master toggle in the Target tab governs them all.
 
 > **[Wiki: AI in Pipeline](https://github.com/samugit83/redamon/wiki/Recon-Pipeline-Workflow#ai-in-pipeline)**
+
+### AI Gauntlet: Offensive AI/LLM Testing
+
+Where the recon pipeline **finds** the AI surface, the **AI Gauntlet attacks it**. Pick the discovered LLM endpoints (or type a custom URL), choose a tool, confirm the Rules of Engagement, and launch: a short-lived container runs the target through four industry red-team tools -- **garak** (broad single-shot scanner, 40 probe families), **PyRIT** (bounded multi-turn jailbreaks), **Giskard** (LLM-assisted safety scan), and **promptfoo** (dataset red-team eval) -- measuring an **Attack Success Rate** per attack and writing the confirmed weaknesses back onto the graph as OWASP-LLM / MITRE-ATLAS-mapped `Vulnerability` findings with evidence transcripts.
+
+It is **deterministic** (seeds, fixed bounds, pinned tool versions) and runs with **zero external egress**: every judge / grader / embedding call is forced to a local Ollama model, so no payload or transcript ever leaves your machine. Off by default and RoE-gated, with live phase-by-phase progress, and findings surfaced in the Red Zone **AI Gauntlet Vulnerabilities** table and the pentest report.
+
+> **[Wiki: AI Gauntlet](https://github.com/samugit83/redamon/wiki/AI-Gauntlet)** | **[Technical: AI_ATTACK_SURFACE.md](readmes/AI_ATTACK_SURFACE.md)**
 
 ### GVM Vulnerability Scanner
 

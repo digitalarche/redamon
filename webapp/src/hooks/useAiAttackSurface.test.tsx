@@ -11,6 +11,7 @@ class MockEventSource {
   static instances: MockEventSource[] = []
   url: string
   onerror: (() => void) | null = null
+  onopen: (() => void) | null = null
   listeners: Record<string, (ev: MessageEvent) => void> = {}
   closed = false
   constructor(url: string) {
@@ -78,6 +79,48 @@ describe('useAiAttackSurface', () => {
     act(() => { es.emit('log', { log: '[Phase 2] Target loading', phase: 'Target loading', phaseNumber: 2, isPhaseStart: true, level: 'info' }) })
     expect(result.current.phase).toEqual({ name: 'Target loading', num: 2 })
     expect(result.current.logs).toHaveLength(1)
+  })
+
+  test('reconnects to an in-flight run on mount (stateful across refresh)', async () => {
+    vi.stubGlobal('fetch', routedFetch({
+      '/all': { runs: [{ run_id: 'r9', status: 'running', tool: 'pyrit' }] },
+      '/status': { run_id: 'r9', status: 'running' },
+    }))
+    const { result } = renderHook(() => useAiAttackSurface('p1'))
+    // the mount effect fires reconnect() -> /all -> finds the running run
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(result.current.run?.run_id).toBe('r9')          // status restored
+    const es = MockEventSource.instances.find((e) => e.url.includes('/r9/logs'))
+    expect(es).toBeTruthy()                                  // log stream re-attached
+    // live logs resume after reconnect
+    act(() => { es!.emit('log', { log: 'resumed', level: 'info' }) })
+    expect(result.current.logs.map((l) => l.log)).toContain('resumed')
+  })
+
+  test('does NOT reconnect when there is no active run', async () => {
+    vi.stubGlobal('fetch', routedFetch({ '/all': { runs: [{ run_id: 'old', status: 'completed' }] } }))
+    const { result } = renderHook(() => useAiAttackSurface('p1'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current.run).toBeNull()
+    expect(MockEventSource.instances).toHaveLength(0)
+  })
+
+  test('stream onopen resets logs so a full-history replay does not duplicate', async () => {
+    vi.stubGlobal('fetch', routedFetch({
+      '/all': { runs: [{ run_id: 'r9', status: 'running', tool: 'garak' }] },
+      '/status': { run_id: 'r9', status: 'running' },
+    }))
+    const { result } = renderHook(() => useAiAttackSurface('p1'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const es = MockEventSource.instances.find((e) => e.url.includes('/r9/logs'))!
+    act(() => { es.emit('log', { log: 'stale', level: 'info' }) })   // pre-replay line
+    expect(result.current.logs).toHaveLength(1)
+    // server (re)opens the stream and replays from the start -> client resets
+    act(() => { es.onopen?.() })
+    expect(result.current.logs).toHaveLength(0)
+    act(() => { es.emit('log', { log: 'fresh', level: 'info' }) })
+    expect(result.current.logs.map((l) => l.log)).toEqual(['fresh'])
   })
 
   test('completion stops the stream and loads findings', async () => {

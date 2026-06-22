@@ -226,9 +226,8 @@ class TestAdapterFindings(unittest.TestCase):
         # Egress guard: the giskard subprocess env must not carry OPENAI_API_KEY.
         captured = {}
         with patch.dict(os.environ, {"OPENAI_API_KEY": "leak"}), \
-             patch.object(gadapter.subprocess, "run") as mrun:
-            from types import SimpleNamespace
-            mrun.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+             patch.object(gadapter, "run_streamed") as mrun:
+            mrun.return_value = (0, "")
             gadapter._invoke("/tmp/cfg.json")
             captured = mrun.call_args.kwargs["env"]
         self.assertNotIn("OPENAI_API_KEY", captured)

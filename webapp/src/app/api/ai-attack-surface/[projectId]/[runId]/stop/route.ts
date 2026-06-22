@@ -17,7 +17,7 @@ export async function POST(_request: NextRequest, { params }: RouteParams) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
       return NextResponse.json(
-        { error: errorData.detail || 'Failed to stop AI Attack Surface scan' },
+        { error: errorData.detail || 'Failed to stop AI Gauntlet scan' },
         { status: response.status },
       )
     }

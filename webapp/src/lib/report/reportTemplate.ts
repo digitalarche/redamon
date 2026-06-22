@@ -1441,7 +1441,7 @@ function renderAiAttackFindings(ai: ReportData['aiSurface']): string {
     </tr>`
   }).join('\n')
   const corroborated = ai.attackFindings.filter(f => f.sources.length > 1).length
-  return `<h3>Tested Vulnerabilities — AI Attack Surface</h3>
+  return `<h3>Tested Vulnerabilities — AI Gauntlet</h3>
   <p class="lead" style="font-size:13px">
     Confirmed by deterministic offensive testing (<strong>${esc(toolsRun.join(', '))}</strong>),
     grouped by OWASP-LLM id and target. ASR = attack-success rate over trials.

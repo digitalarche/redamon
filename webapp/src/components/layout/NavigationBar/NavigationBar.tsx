@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
     enabled: true,
   },
   {
-    label: 'AI Attack Surface',
+    label: 'AI Gauntlet',
     href: '/ai-attack-surface',
     icon: <ShieldAlert size={16} />,
     enabled: true,

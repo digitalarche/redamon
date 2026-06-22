@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [5.0.0] - 2026-06-22
+
+### Added
+
+- **AI Gauntlet — offensive AI/LLM testing** ([ai_attack_surface_scan/](ai_attack_surface_scan/), [webapp/src/app/ai-attack-surface/page.tsx](webapp/src/app/ai-attack-surface/page.tsx), [recon_orchestrator/container_manager.py](recon_orchestrator/container_manager.py), [normalizer.py](ai_attack_surface_scan/normalizer.py)) — new offensive module that attacks the LLM endpoints recon discovered, running selected `Endpoint` targets through four red-team tools in isolated per-tool venvs / Node CLI: **garak** (broad single-shot, 40 probe families), **PyRIT** (bounded multi-turn jailbreaks), **Giskard** (LLM-assisted safety scan), and **promptfoo** (dataset red-team eval). A short-lived host-network container runs the chosen tool with operator-set bounds (generations, ASR threshold, judge model, max turns, seed) behind a mandatory RoE gate, streams live `[Phase 1..4]` progress to the UI over SSE, and normalizes every tool's output into unified `Vulnerability` findings (OWASP-LLM / ATLAS mapped, ASR + trials + transcript ref) MERGEd back onto the attacked endpoint — materialising the target node chain for custom / off-graph URLs so a finding never orphans. Deterministic and **zero external egress**: all judge/grader/embedding calls are forced to a local Ollama model (default `qwen2.5:7b`) and `OPENAI_API_KEY` is stripped from every tool subprocess. Off by default (it sends adversarial payloads). Docs: [readmes/AI_ATTACK_SURFACE.md](readmes/AI_ATTACK_SURFACE.md) + wiki [AI Gauntlet](https://github.com/samugit83/redamon/wiki/AI-Gauntlet).
+
+- **AI Gauntlet Vulnerabilities table + report section** ([AiTables.tsx](webapp/src/app/graph/components/RedZoneTables/AiTables.tsx), [reportTemplate.ts](webapp/src/lib/report/reportTemplate.ts)) — the confirmed, payload-tested findings get a new sub-sheet in the Red Zone **AI Risk** Data Table (tool, OWASP-LLM id, attack chip, target, ASR, trials, severity, transcript) and a dedicated **Tested Vulnerabilities — AI Gauntlet** report section that highlights cross-tool corroboration (a weakness confirmed by more than one tool).
+
+---
+
 ## [4.15.1] - 2026-06-06
 
 ### Fixed

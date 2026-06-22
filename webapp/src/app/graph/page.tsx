@@ -435,6 +435,9 @@ export default function GraphPage() {
   const filterTableRows = useTableData(filterGraphData ?? undefined)
   const [globalFilter, setGlobalFilter] = useState('')
   const [tableViewMode, setTableViewMode] = useState<TableViewMode>('nodeDetails')
+  // Sheet to pre-select inside a multi-sheet table when deep-linked (?sheet=...).
+  // Cleared on any manual table switch so it never overrides a later manual open.
+  const [deepLinkSheet, setDeepLinkSheet] = useState<string | null>(null)
   const [jsReconSearch, setJsReconSearch] = useState('')
   const [jsReconData, setJsReconData] = useState<JsReconData | null>(null)
   const [activeNodeTypes, setActiveNodeTypes] = useState<Set<string>>(new Set())
@@ -961,6 +964,15 @@ export default function GraphPage() {
       setActiveLogsDrawer(openLogs as 'recon' | 'gvm' | 'githubHunt' | 'trufflehog' | `partialRecon:${string}`)
       router.replace(`/graph?project=${projectId}`)
     }
+    // Deep-link into a specific Red Zone table (e.g. ?table=aiRisk from the AI
+    // Attack Surface page's "Show findings" button).
+    const tableParam = searchParams.get('table')
+    if (tableParam && projectId) {
+      setActiveView('table')
+      setTableViewMode(tableParam as TableViewMode)
+      setDeepLinkSheet(searchParams.get('sheet'))   // optional sub-sheet to open
+      router.replace(`/graph?project=${projectId}`)
+    }
   }, [searchParams, projectId, router])
 
   const handleConfirmRecon = useCallback(async () => {
@@ -1276,7 +1288,7 @@ export default function GraphPage() {
         onSelectFilter={setSelectedFilterId}
         onDeleteFilter={handleDeleteFilter}
         tableViewMode={tableViewMode}
-        onTableViewModeChange={setTableViewMode}
+        onTableViewModeChange={(m) => { setDeepLinkSheet(null); setTableViewMode(m) }}
         jsReconSearch={jsReconSearch}
         onJsReconSearchChange={setJsReconSearch}
         onJsReconExportCsv={jsReconData ? async () => {
@@ -1355,7 +1367,7 @@ export default function GraphPage() {
             ) : tableViewMode === 'aiSurface' ? (
               <AiSurfaceTable projectId={projectId} />
             ) : tableViewMode === 'aiRisk' ? (
-              <AiRiskTable projectId={projectId} />
+              <AiRiskTable projectId={projectId} initialSheet={deepLinkSheet} />
             ) : tableViewMode === 'killChain' ? (
               <KillChainTable projectId={projectId} />
             ) : tableViewMode === 'blastRadius' ? (

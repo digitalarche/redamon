@@ -2948,12 +2948,18 @@ labels). `source` ∈ {`garak`, `pyrit`, `giskard`, `promptfoo`}. Properties:
 | `ai_probe_pack_version` | tool+version for reproducibility, e.g. `garak/0.15.1`, `pyrit/0.14.0`, `giskard/2.19.1`, `promptfoo/0.121.17` |
 | `ai_transcript_ref` | path to the saved native report on disk (`ai_attack_surface_scan/output/{run_id}/{tool}/…`) |
 | `ai_target_url` | the attacked URL (so a custom off-graph target still displays a target) |
+| `ai_attack_synthetic` | `true` on a `BaseURL`/`Endpoint`/`Subdomain`/`Domain`/`IP` node the normalizer *created* for a custom off-graph target (so it never overwrites or is confused with a recon-discovered node). Such nodes also carry `source='ai_attack_target'`. |
 
 Deterministic `id` (`aiatk_<sha16>`, keyed on source + OWASP-LLM id + payload_class +
 target → re-runs MERGE rather than duplicate; the same vuln found by two tools dedups
-on the payload class). Linked to the attacked `Endpoint` via `HAS_VULNERABILITY`
-(fallback BaseURL → Subdomain → Domain), so AI-attack findings sit next to
-nuclei/GVM findings in the RedZone tables and the main report.
+on the payload class). **A finding is never orphaned.** It links to the attacked
+`Endpoint` via `HAS_VULNERABILITY` when recon already discovered it; otherwise the
+normalizer materialises the target node chain — `BaseURL -[:HAS_ENDPOINT]-> Endpoint`
+anchored to `Domain -[:HAS_SUBDOMAIN]-> Subdomain -[:HAS_BASEURL]-> BaseURL` for a
+hostname, or to an `IP -[:HAS_VULNERABILITY]-> Vulnerability` for a raw IP (nodes
+marked `source='ai_attack_target'`, `ai_attack_synthetic=true`), mirroring how
+partial recon materialises user-typed inputs. So AI-attack findings always sit
+connected next to nuclei/GVM findings in the RedZone tables and the main report.
 
 ### Properties reserved for later laps
 

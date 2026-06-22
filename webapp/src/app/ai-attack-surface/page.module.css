@@ -4,27 +4,83 @@
 .title { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 700; margin: 0; }
 .subtitle { margin: 6px 0 0; opacity: 0.7; font-size: 14px; }
 .discovered { font-weight: 600; opacity: 0.9; }
+.backBtn { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border: 1px solid rgba(128,128,128,0.4); background: transparent; color: inherit; border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.backBtn:hover { background: rgba(128,128,128,0.12); }
+.headerActions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* "Show findings" — jumps to the Red Zone AI Attack Vulnerabilities table */
+.showFindings { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border: 1px solid rgba(34,197,94,0.5); background: rgba(34,197,94,0.1); color: inherit; border-radius: 8px; padding: 7px 14px; font-size: 13px; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.showFindings:hover { background: rgba(34,197,94,0.2); border-color: rgba(34,197,94,0.7); }
+.findingsCta { margin-top: 16px; }
 
 .filterBar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .filterLabel { font-size: 13px; opacity: 0.6; margin-right: 4px; }
-.filterChip { background: transparent; border: 1px solid; border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer; opacity: 0.55; transition: opacity 0.12s; }
+.filterChip { background: transparent; border: 1px solid; border-radius: 5px; padding: 3px 12px; font-size: 12px; cursor: pointer; opacity: 0.55; transition: opacity 0.12s; }
 .filterChip:hover { opacity: 0.85; }
-.filterChipActive { opacity: 1; font-weight: 700; }
+.filterChipActive { opacity: 1; font-weight: 700; background: rgba(59,130,246,0.12); }
+.filterClear { background: transparent; border: 1px solid rgba(128,128,128,0.4); border-radius: 5px; padding: 3px 12px; font-size: 12px; color: inherit; opacity: 0.7; cursor: pointer; }
+.filterClear:hover { opacity: 1; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 28px; }
-.card { border: 1px solid rgba(128,128,128,0.25); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px; background: rgba(128,128,128,0.04); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-bottom: 28px; align-items: stretch; }
+.card {
+  position: relative;
+  border: 1px solid rgba(128,128,128,0.22);
+  border-radius: 6px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  background: linear-gradient(160deg, rgba(128,128,128,0.07), rgba(128,128,128,0.02));
+  overflow: hidden;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #dc2626, #f59e0b);
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+.card:hover { transform: translateY(-3px); border-color: rgba(220,38,38,0.45); box-shadow: 0 10px 26px rgba(0,0,0,0.20); }
+.card:hover::before { opacity: 1; }
 .cardGreyed { opacity: 0.45; }
+.cardGreyed:hover { transform: none; border-color: rgba(128,128,128,0.22); box-shadow: none; }
+.cardGreyed:hover::before { opacity: 0; }
+
+/* Other tools, locked while a scan runs (one scan at a time) */
+.cardLocked { opacity: 0.5; }
+.cardLocked:hover { transform: none; border-color: rgba(128,128,128,0.22); box-shadow: none; }
+.cardLocked:hover::before { opacity: 0; }
+
+/* The tool whose scan is currently running */
+.cardRunning { border-color: rgba(59,130,246,0.55); box-shadow: 0 0 0 1px rgba(59,130,246,0.30); }
+.cardRunning::before { opacity: 1; background: linear-gradient(90deg, #3b82f6, #22c55e); }
+.cardNameText { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cardNameText :global(svg) { color: #3b82f6; flex-shrink: 0; }
+
+/* Badges sit at the bottom of the card */
+.cardFooter { margin-top: auto; display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
 .cardChips { display: flex; flex-wrap: wrap; gap: 5px; }
-.chip { border: 1px solid; border-radius: 999px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
-.cardName { font-size: 17px; font-weight: 700; display: flex; justify-content: space-between; align-items: baseline; }
-.cardStyle { font-size: 11px; opacity: 0.6; font-weight: 500; }
-.cardPurpose { font-size: 13px; opacity: 0.75; }
-.cardMeta { display: flex; justify-content: space-between; font-size: 11px; opacity: 0.6; margin-top: 4px; }
-.cardActions { display: flex; justify-content: flex-end; align-items: center; margin-top: 8px; }
-.soon { font-size: 11px; opacity: 0.5; font-style: italic; }
-.launchBtn { border: 1px solid rgba(128,128,128,0.4); background: transparent; color: inherit; border-radius: 8px; padding: 5px 14px; font-size: 13px; cursor: pointer; }
-.launchBtn:hover:not(:disabled) { background: rgba(128,128,128,0.12); }
+.chip { border: 1px solid; border-radius: 5px; padding: 2px 8px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+
+.cardName { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--color-green-300); }
+/* Deeper green on light backgrounds for AA contrast; light green on dark */
+:global([data-theme='light']) .cardName { color: var(--color-green-600); }
+@media (prefers-color-scheme: light) {
+  :global(:root:not([data-theme='dark'])) .cardName { color: var(--color-green-600); }
+}
+.cardStyle { font-size: 11px; font-weight: 500; flex-shrink: 0; color: var(--text-tertiary); }
+.cardPurpose { font-size: 13px; opacity: 0.75; line-height: 1.45; }
+.cardMeta { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; opacity: 0.6; margin-top: 2px; }
+.cardActions { display: flex; justify-content: flex-end; align-items: center; }
+.soon { font-size: 11px; opacity: 0.5; font-style: italic; margin-right: auto; }
+.launchBtn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(220,38,38,0.5); background: rgba(220,38,38,0.1); color: inherit; border-radius: 6px; padding: 6px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.14s ease, border-color 0.14s ease, transform 0.1s ease; }
+.launchBtn:hover:not(:disabled) { background: rgba(220,38,38,0.2); border-color: rgba(220,38,38,0.7); }
+.launchBtn:active:not(:disabled) { transform: scale(0.97); }
 .launchBtn:disabled { cursor: not-allowed; opacity: 0.5; }
+.launchBtnOpen { background: rgba(128,128,128,0.08); border-color: rgba(128,128,128,0.4); }
+.launchBtnOpen:hover:not(:disabled) { background: rgba(128,128,128,0.16); border-color: rgba(128,128,128,0.55); }
 
 .detail { border: 1px solid rgba(128,128,128,0.25); border-radius: 12px; padding: 20px; margin-bottom: 28px; }
 .detailTitle { font-size: 18px; font-weight: 700; margin: 0 0 14px; }
@@ -56,9 +112,10 @@
   color: #b45309; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.35);
   border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
 .probeCard input { margin-top: 3px; flex-shrink: 0; }
-.probeBody { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.probeBody { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; align-self: stretch; }
 .probeName { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
 .probeDesc { font-size: 12px; opacity: 0.6; line-height: 1.35; }
+.probeChip { margin-top: auto; padding-top: 6px; display: flex; justify-content: flex-start; }
 
 /* Custom (off-graph) target form */
 .customTag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid rgba(168,85,247,0.6); color: #a855f7; border-radius: 4px; padding: 0 5px; }
@@ -88,7 +145,7 @@
 .purposeLabel em { opacity: 0.6; font-style: italic; }
 .purposeInput { width: 100%; padding: 6px 8px; border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; background: transparent; color: inherit; font: inherit; resize: vertical; }
 .strategyRow { display: flex; flex-wrap: wrap; gap: 6px; }
-.strategyChip { font-size: 12px; padding: 4px 10px; border: 1px solid rgba(128,128,128,0.35); border-radius: 999px; background: transparent; color: inherit; cursor: pointer; }
+.strategyChip { font-size: 12px; padding: 4px 10px; border: 1px solid rgba(128,128,128,0.35); border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
 .strategyChipOn { border-color: rgba(59,130,246,0.6); background: rgba(59,130,246,0.12); font-weight: 600; }
 .roe { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 8px 0; }
 
@@ -100,8 +157,15 @@
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* "scanning" indicator on the Output header (all tools) */
+.scanning { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-size: 12px; font-weight: 600; color: #4ade80; }
+.scanBar { position: relative; height: 3px; border-radius: 3px; overflow: hidden; background: rgba(74,222,128,0.15); margin: 4px 0 10px; }
+.scanBar::before { content: ''; position: absolute; top: 0; left: -40%; width: 40%; height: 100%;
+  background: linear-gradient(90deg, transparent, #4ade80, transparent); animation: scanSlide 1.1s ease-in-out infinite; }
+@keyframes scanSlide { 0% { left: -40%; } 100% { left: 100%; } }
+
 .status { font-size: 13px; margin-bottom: 10px; }
-.logs { background: rgba(0,0,0,0.35); border-radius: 8px; padding: 12px; font-size: 12px; max-height: 320px; overflow: auto; font-family: monospace; }
+.logs { background: #0a0a0a; color: #e5e7eb; border-radius: 8px; padding: 12px; font-size: 12px; max-height: 320px; overflow: auto; font-family: monospace; }
 .log_info { opacity: 0.85; }
 .log_error { color: #f87171; }
 .log_success { color: #4ade80; }

@@ -8,10 +8,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 from pathlib import Path
 
 from normalizer import Finding
+from proc import run_streamed
 
 from .objectives import DEFAULT_ATTACKS, attack_meta
 from .parser import parse_report
@@ -132,8 +132,4 @@ def run(target, bounds, output_dir: str, run_id: str,
 def _invoke(cfg_path):
     cmd = [PYRIT_PYTHON, RUNNER, str(cfg_path)]
     logger.info(f"Running PyRIT: {' '.join(cmd)}")
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_TIMEOUT)
-        return proc.returncode, (proc.stdout or "")[-1500:] + (proc.stderr or "")[-1500:]
-    except subprocess.TimeoutExpired:
-        return -1, f"TIMEOUT after {DEFAULT_TIMEOUT}s"
+    return run_streamed(cmd, timeout=DEFAULT_TIMEOUT, tag="pyrit")

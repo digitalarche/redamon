@@ -4,8 +4,11 @@ Every tool has its own native parser; all parsers emit the SAME Finding shape,
 which this module maps onto the existing `Vulnerability` label using the fields
 the schema reserves for this lap (ai_owasp_llm_id, ai_asr, ai_trials, ...).
 Zero new node labels. Findings link to the attacked Endpoint via
-HAS_VULNERABILITY (fallback BaseURL -> Subdomain -> Domain), exactly like the
-MCP static findings already produced by ai_surface_recon.
+HAS_VULNERABILITY. When the target is custom / off-graph (no Endpoint exists),
+the normalizer materialises the target node chain (BaseURL -> Endpoint, anchored
+to a Subdomain+Domain or IP) marked ``source='ai_attack_target'`` so the finding
+is never a disconnected island -- the same approach partial recon uses for
+user-typed inputs.
 """
 from __future__ import annotations
 
@@ -91,11 +94,24 @@ def _props(finding: Finding, vid: str, user_id: str, project_id: str) -> dict:
     }
 
 
-def write_finding(session, finding: Finding, user_id: str, project_id: str) -> bool:
-    """MERGE the Vulnerability and link it to the attacked Endpoint.
+def write_finding(session, finding: Finding, user_id: str, project_id: str,
+                  target=None) -> str:
+    """MERGE the Vulnerability and connect it into the graph. Never orphans.
 
-    Returns True if it linked to a specific Endpoint, False if it fell back to a
-    coarser parent (BaseURL/Subdomain/Domain) or could not link at all.
+    Linking strategy (a finding must ALWAYS end up connected, §6.3):
+      1. If the attacked Endpoint already exists -> HAS_VULNERABILITY to it.
+      2. Otherwise MATERIALISE the target: create the BaseURL -> Endpoint chain
+         (marked ``source='ai_attack_target'``, ``ai_attack_synthetic=true``),
+         anchor it to a host node (Subdomain+Domain for a hostname, IP for a raw
+         IP), and link the finding to the new Endpoint. This mirrors how partial
+         recon materialises user-typed inputs, so a custom (off-graph) target is
+         never a disconnected island.
+
+    ``target`` (a target_loader.Target, optional) supplies the request method and
+    AI annotations (ai_interface_type / ai_model_ids) stamped on a created node.
+
+    Returns "existing" (linked to a pre-existing Endpoint), "created" (target
+    materialised), or "" only on an unexpected write failure.
     """
     vid = finding_id(finding)
     props = _props(finding, vid, user_id, project_id)
@@ -111,8 +127,8 @@ def write_finding(session, finding: Finding, user_id: str, project_id: str) -> b
 
     base_url = finding.baseurl
     path = finding.path or "/"
-    host = urlparse(base_url).hostname or "" if base_url else ""
 
+    # Tier 1: link to an Endpoint that recon already discovered for this target.
     linked = session.run(
         """
         MATCH (v:Vulnerability {id: $id})
@@ -128,22 +144,106 @@ def write_finding(session, finding: Finding, user_id: str, project_id: str) -> b
     ).single()
 
     if linked and linked.get("linked"):
-        return True
+        return "existing"
 
-    # Fallback: attach to the coarsest existing parent so the finding never orphans.
+    # Tier 2: no Endpoint exists (custom / off-graph target, or recon lost it) ->
+    # materialise the target node chain and link, so the finding is never orphaned.
+    _ensure_target_node(session, finding, vid, user_id, project_id, target)
+    return "created"
+
+
+def _is_ip(host: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _registrable(host: str) -> str:
+    """Naive eTLD+1 (no PSL): keep the last two labels, else the host itself.
+    Good enough to give a created Subdomain a Domain anchor to hang off."""
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) > 2 else host
+
+
+def _ensure_target_node(session, finding: Finding, vid: str,
+                        user_id: str, project_id: str, target=None) -> None:
+    """Create the attacked target's node chain and link the finding to it.
+
+    Builds ``BaseURL -[:HAS_ENDPOINT]-> Endpoint -[:HAS_VULNERABILITY]-> Vuln``
+    (always connected) and anchors the BaseURL to a host root so it joins the
+    graph rather than floating: a hostname gets ``Domain -[:HAS_SUBDOMAIN]->
+    Subdomain -[:HAS_BASEURL]-> BaseURL``; a raw IP gets ``IP -[:HAS_VULNERABILITY]
+    -> Vuln`` (the IP, Endpoint and BaseURL share the one Vulnerability node, so
+    the whole thing is a single connected component). Created nodes carry
+    ``source='ai_attack_target'`` + ``ai_attack_synthetic=true`` so they are
+    distinguishable from recon-discovered nodes and never overwrite them.
+    """
+    base_url = finding.baseurl or ""
+    path = finding.path or "/"
+    method = (getattr(target, "method", None) or "POST")
+    iface = getattr(target, "ai_interface_type", None)
+    model_ids = getattr(target, "ai_model_ids", None)
+    parsed = urlparse(base_url)
+    host = parsed.hostname or ""
+
+    # BaseURL + Endpoint + the finding edge.
     session.run(
         """
+        MERGE (b:BaseURL {url: $baseurl, user_id: $uid, project_id: $pid})
+          ON CREATE SET b.source = 'ai_attack_target', b.ai_attack_synthetic = true,
+                        b.scheme = $scheme, b.host = $host, b.created_at = datetime()
+        SET b.updated_at = datetime()
+        MERGE (e:Endpoint {path: $path, method: $method, baseurl: $baseurl,
+                           user_id: $uid, project_id: $pid})
+          ON CREATE SET e.source = 'ai_attack_target', e.ai_attack_synthetic = true,
+                        e.created_at = datetime()
+        SET e.ai_interface_type = COALESCE($iface, e.ai_interface_type),
+            e.ai_model_ids      = COALESCE($models, e.ai_model_ids),
+            e.updated_at = datetime()
+        MERGE (b)-[:HAS_ENDPOINT]->(e)
+        WITH e
         MATCH (v:Vulnerability {id: $id})
-        OPTIONAL MATCH (b:BaseURL {url: $baseurl, user_id: $uid, project_id: $pid})
-        OPTIONAL MATCH (s:Subdomain {name: $host, user_id: $uid, project_id: $pid})
-        OPTIONAL MATCH (d:Domain {name: $host, user_id: $uid, project_id: $pid})
-        WITH v, coalesce(b, s, d) AS parent
-        FOREACH (_ IN CASE WHEN parent IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (parent)-[:HAS_VULNERABILITY]->(v))
+        MERGE (e)-[:HAS_VULNERABILITY]->(v)
         """,
-        id=vid, baseurl=base_url, host=host, uid=user_id, pid=project_id,
+        baseurl=base_url, path=path, method=method, uid=user_id, pid=project_id,
+        scheme=parsed.scheme or "http", host=host, iface=iface, models=model_ids, id=vid,
     )
-    return False
+
+    if not host:
+        return
+
+    if _is_ip(host):
+        # No IP-[:HAS_BASEURL] in the schema; anchor the IP to the shared
+        # Vulnerability (vhost_sni precedent) so the component stays connected.
+        session.run(
+            """
+            MATCH (v:Vulnerability {id: $id})
+            MERGE (ip:IP {address: $host, user_id: $uid, project_id: $pid})
+              ON CREATE SET ip.source = 'ai_attack_target', ip.ai_attack_synthetic = true,
+                            ip.created_at = datetime()
+            MERGE (ip)-[:HAS_VULNERABILITY]->(v)
+            """,
+            id=vid, host=host, uid=user_id, pid=project_id,
+        )
+    else:
+        session.run(
+            """
+            MATCH (b:BaseURL {url: $baseurl, user_id: $uid, project_id: $pid})
+            MERGE (s:Subdomain {name: $host, user_id: $uid, project_id: $pid})
+              ON CREATE SET s.source = 'ai_attack_target', s.ai_attack_synthetic = true,
+                            s.updated_at = datetime()
+            MERGE (s)-[:HAS_BASEURL]->(b)
+            MERGE (d:Domain {name: $domain, user_id: $uid, project_id: $pid})
+              ON CREATE SET d.source = 'ai_attack_target', d.ai_attack_synthetic = true,
+                            d.updated_at = datetime()
+            MERGE (d)-[:HAS_SUBDOMAIN]->(s)
+            """,
+            baseurl=base_url, host=host, domain=_registrable(host),
+            uid=user_id, pid=project_id,
+        )
 
 
 def make_dummy_finding(target, tool: str, run_id: str) -> Finding:

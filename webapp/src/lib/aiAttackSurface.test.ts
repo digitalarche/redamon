@@ -69,11 +69,16 @@ describe('cards', () => {
     }
   })
 
-  test('garak exposes the full v0.15.1 family catalog (minus the no-op test probe)', () => {
+  test('garak catalog excludes inactive-by-default + no-op families that abort the run', () => {
     const ids = GARAK_CARD.probes.map((p) => p.id)
-    expect(ids).toHaveLength(40)
+    expect(ids).toHaveLength(34)                 // full v0.15.1 minus the 6 below
     expect(new Set(ids).size).toBe(ids.length)   // unique
-    expect(ids).not.toContain('test')            // no-op smoke probe is excluded
+    expect(ids).not.toContain('test')            // no-op smoke probe
+    // These garak families have ZERO active sub-probes by default, so selecting
+    // one makes garak abort the WHOLE run. They must never appear in the catalog.
+    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling']) {
+      expect(ids, `${dead} is inactive-by-default and must be removed`).not.toContain(dead)
+    }
   })
 
   test('only the four MVP families default to checked', () => {

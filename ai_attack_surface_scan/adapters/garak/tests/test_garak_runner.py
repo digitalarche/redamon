@@ -1,13 +1,13 @@
 """Unit tests for the garak subprocess runner (the previously-mocked layer).
 
 Asserts the exact CLI we build (TOOL_API.md §1), the judge/key env wiring, the
-report.jsonl location logic, and timeout handling. subprocess is mocked.
+report.jsonl location logic, and timeout handling. The streaming subprocess
+helper (run_streamed) is mocked.
 """
 import os
-import subprocess
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from adapters.garak import runner
 from adapters.garak.runner import _locate_report, run_garak_scan
@@ -15,8 +15,8 @@ from adapters.garak.runner import _locate_report, run_garak_scan
 
 class TestCommandConstruction(unittest.TestCase):
     def test_cmd_flags_and_env(self):
-        with patch.object(runner.subprocess, "run") as mrun:
-            mrun.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        with patch.object(runner, "run_streamed") as mrun:
+            mrun.return_value = (0, "ok")
             report, rc, tail = run_garak_scan(
                 config_path="/cfg.json", probes=["dan", "encoding"],
                 generations=3, seed=7, report_prefix="/out/garak_run",
@@ -36,20 +36,56 @@ class TestCommandConstruction(unittest.TestCase):
         self.assertTrue(env["OPENAI_API_BASE"].endswith("/v1"))
         self.assertEqual(rc, 0)
 
+    def test_parallel_attempts_flows_to_cli(self):
+        with patch.object(runner, "run_streamed") as mrun:
+            mrun.return_value = (0, "")
+            run_garak_scan("/c.json", ["dan"], 1, 0, "/out/g", parallel_attempts=2)
+        cmd = mrun.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--parallel_attempts") + 1], "2")
+
     def test_no_key_no_rest_api_key_env(self):
-        with patch.object(runner.subprocess, "run") as mrun:
-            mrun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(runner, "run_streamed") as mrun:
+            mrun.return_value = (0, "")
             run_garak_scan("/c.json", ["dan"], 1, 0, "/out/g")
         env = mrun.call_args.kwargs["env"]
         self.assertNotIn("REST_API_KEY", env)
         self.assertNotIn("OPENAI_API_BASE", env)  # no judge_base_url given
 
     def test_timeout_returns_rc_minus_one(self):
-        with patch.object(runner.subprocess, "run",
-                          side_effect=subprocess.TimeoutExpired(cmd="garak", timeout=1)):
+        # run_streamed owns the timeout now; it returns (-1, "...TIMEOUT...").
+        with patch.object(runner, "run_streamed", return_value=(-1, "TIMEOUT after 1s")):
             report, rc, tail = run_garak_scan("/c.json", ["dan"], 1, 0, "/out/g", timeout=1)
         self.assertEqual(rc, -1)
         self.assertIn("TIMEOUT", tail)
+
+    def test_inactive_families_are_dropped_and_run_retries(self):
+        # First call: garak aborts because doctor+donotanswer are inactive.
+        # Second call: it must retry with ONLY the active families and succeed.
+        inactive_msg = ("garak ... ❌ all probes in 'doctor,donotanswer' are marked "
+                        "inactive; select one or more by name to continue")
+        with patch.object(runner, "run_streamed",
+                          side_effect=[(0, inactive_msg), (0, "ok")]) as mrun, \
+             patch.object(runner, "_locate_report",
+                          side_effect=[None, "/out/g.report.jsonl"]):
+            report, rc, tail = run_garak_scan(
+                "/c.json", ["promptinject", "dan", "doctor", "donotanswer", "lmrc"],
+                1, 0, "/out/g")
+        self.assertEqual(mrun.call_count, 2)
+        # retry CLI must contain the active families and NOT the inactive ones
+        retry_probes = mrun.call_args_list[1].args[0][
+            mrun.call_args_list[1].args[0].index("--probes") + 1]
+        self.assertEqual(retry_probes, "promptinject,dan,lmrc")
+        self.assertEqual(report, "/out/g.report.jsonl")
+
+    def test_all_inactive_does_not_loop_forever(self):
+        # If EVERY selected family is inactive, drop them, don't retry endlessly.
+        msg = "❌ all probes in 'doctor,donotanswer' are marked inactive"
+        with patch.object(runner, "run_streamed", return_value=(0, msg)) as mrun, \
+             patch.object(runner, "_locate_report", return_value=None):
+            report, rc, tail = run_garak_scan(
+                "/c.json", ["doctor", "donotanswer"], 1, 0, "/out/g")
+        self.assertIsNone(report)
+        self.assertEqual(mrun.call_count, 1)  # nothing left to retry with
 
 
 class TestLocateReport(unittest.TestCase):
@@ -73,8 +109,8 @@ class TestLocateReport(unittest.TestCase):
 
     def test_run_returns_none_report_when_no_file(self):
         with tempfile.TemporaryDirectory() as d, \
-             patch.object(runner.subprocess, "run") as mrun:
-            mrun.return_value = MagicMock(returncode=0, stdout="", stderr="")
+             patch.object(runner, "run_streamed") as mrun:
+            mrun.return_value = (0, "")
             report, rc, tail = run_garak_scan("/c.json", ["dan"], 1, 0,
                                               os.path.join(d, "garak_run"))
         self.assertIsNone(report)

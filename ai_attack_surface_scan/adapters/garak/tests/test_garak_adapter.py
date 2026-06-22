@@ -129,6 +129,18 @@ class TestRestConfig(unittest.TestCase):
         c = self._cfg("/v1/messages")
         self.assertEqual(c["response_json_field"], "$.content[0].text")
 
+    def test_response_is_token_capped(self):
+        # Every family must bound the victim's reply so a runaway generation
+        # can't blow past request_timeout and crash the run. OpenAI-compat APIs
+        # use max_tokens; native Ollama uses options.num_predict.
+        for path in ("/v1/chat/completions", "/v1/completions", "/v1/messages"):
+            body = self._cfg(path)["req_template_json_object"]
+            self.assertEqual(body.get("max_tokens"), 512, f"{path} missing max_tokens")
+        for path in ("/api/chat", "/api/generate"):
+            body = self._cfg(path)["req_template_json_object"]
+            self.assertEqual(body.get("options", {}).get("num_predict"), 512,
+                             f"{path} missing options.num_predict")
+
     def test_bearer_auth_header(self):
         t = Target(baseurl="http://h", path="/v1/chat/completions")
         c = build_rest_config(t, model="m", auth_header="Authorization", auth_scheme="Bearer")["rest"]["RestGenerator"]
@@ -288,14 +300,13 @@ class TestRunnerEgress(unittest.TestCase):
     """The garak subprocess must never inherit a hosted OPENAI_API_KEY."""
     def test_openai_key_stripped_and_judge_forced(self):
         from adapters.garak import runner
-        from types import SimpleNamespace
         captured = {}
 
-        def fake_run(cmd, env=None, **k):
+        def fake_stream(cmd, env=None, **k):
             captured["env"] = env
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return (0, "")
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-LEAK", "OPENAI_API_BASE": "https://api.openai.com/v1"}), \
-             patch.object(runner.subprocess, "run", side_effect=fake_run):
+             patch.object(runner, "run_streamed", side_effect=fake_stream):
             runner.run_garak_scan(config_path="/x.json", probes=["dan"], generations=1,
                                   seed=0, report_prefix="/tmp/none/x",
                                   judge_base_url="http://o:11434")
@@ -306,14 +317,13 @@ class TestRunnerEgress(unittest.TestCase):
 
     def test_openai_key_stripped_even_with_no_judge(self):
         from adapters.garak import runner
-        from types import SimpleNamespace
         captured = {}
 
-        def fake_run(cmd, env=None, **k):
+        def fake_stream(cmd, env=None, **k):
             captured["env"] = env
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return (0, "")
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-LEAK"}), \
-             patch.object(runner.subprocess, "run", side_effect=fake_run):
+             patch.object(runner, "run_streamed", side_effect=fake_stream):
             runner.run_garak_scan(config_path="/x.json", probes=["dan"], generations=1,
                                   seed=0, report_prefix="/tmp/none/x", judge_base_url=None)
         self.assertNotIn("OPENAI_API_KEY", captured["env"])

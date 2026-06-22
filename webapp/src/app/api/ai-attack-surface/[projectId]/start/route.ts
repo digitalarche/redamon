@@ -49,7 +49,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
       return NextResponse.json(
-        { error: errorData.detail || 'Failed to start AI Attack Surface scan' },
+        { error: errorData.detail || 'Failed to start AI Gauntlet scan' },
         { status: response.status },
       )
     }

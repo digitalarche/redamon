@@ -263,18 +263,18 @@ class TestNormalizer(unittest.TestCase):
     def test_write_finding_linked_to_endpoint(self):
         session = MagicMock()
         session.run.return_value.single.return_value = fake_record(linked=True)
-        linked = norm.write_finding(session, self._finding(), "u", "p")
-        self.assertTrue(linked)
-        # MERGE + endpoint-link = 2 runs; no fallback when linked.
+        status = norm.write_finding(session, self._finding(), "u", "p")
+        self.assertEqual(status, "existing")
+        # MERGE + endpoint-link = 2 runs; no materialisation when already linked.
         self.assertEqual(session.run.call_count, 2)
 
-    def test_write_finding_falls_back_when_unlinked(self):
+    def test_write_finding_materialises_when_unlinked(self):
         session = MagicMock()
         session.run.return_value.single.return_value = fake_record(linked=False)
-        linked = norm.write_finding(session, self._finding(), "u", "p")
-        self.assertFalse(linked)
-        # MERGE + endpoint-link + fallback = 3 runs.
-        self.assertEqual(session.run.call_count, 3)
+        status = norm.write_finding(session, self._finding(), "u", "p")
+        self.assertEqual(status, "created")
+        # MERGE + endpoint-link + BaseURL/Endpoint create + hostname anchor = 4 runs.
+        self.assertEqual(session.run.call_count, 4)
 
     def test_make_dummy_finding(self):
         target = tl.Target(baseurl="http://h:8000", path="/c",

@@ -39,7 +39,7 @@ beforeEach(() => {
 describe('AI Attack Surface page', () => {
   test('renders the title and the four tool cards', () => {
     render(<AiAttackSurfacePage />)
-    expect(screen.getByText('AI Attack Surface')).toBeTruthy()
+    expect(screen.getByText('AI Gauntlet')).toBeTruthy()
     expect(screen.getByText('garak')).toBeTruthy()
     expect(screen.getByText('PyRIT')).toBeTruthy()
     expect(screen.getByText('giskard')).toBeTruthy()
@@ -73,15 +73,30 @@ describe('AI Attack Surface page', () => {
     expect(screen.getByText('LLM01')).toBeTruthy()
   })
 
+  test('running scan: spinner on its card, and Launch stays disabled (cannot relaunch)', () => {
+    hookState.run = { run_id: 'r1', tool: 'garak', status: 'running' }
+    hookState.targets = [{ baseUrl: 'http://h', path: '/c', method: 'POST', interfaceType: 'llm-chat' }]
+    render(<AiAttackSurfacePage />)
+    // the running tool's card shows the "Running…" state (with spinner)
+    expect(screen.getByText('Running…')).toBeTruthy()
+    // open garak, select a target + confirm RoE — Launch must STILL be disabled
+    // purely because a scan is running (proves the can't-launch-while-running gate)
+    fireEvent.click(screen.getByText('Running…'))
+    fireEvent.click(screen.getByText('http://h/c'))
+    fireEvent.click(screen.getByText(/I confirm this is an authorized/))
+    const launchBtn = screen.getByText('Launch garak').closest('button') as HTMLButtonElement
+    expect(launchBtn.disabled).toBe(true)
+  })
+
   test('garak Configure stays enabled with no endpoint (custom targets allowed)', () => {
     render(<AiAttackSurfacePage />)   // targets = [] by default
-    const btn = screen.getAllByText('Configure')[0] as HTMLButtonElement
+    const btn = screen.getAllByText('Configure & launch')[0] as HTMLButtonElement
     expect(btn.disabled).toBe(false)
   })
 
   test('opening garak with no endpoints still shows the custom-target form + auth', () => {
     render(<AiAttackSurfacePage />)
-    fireEvent.click(screen.getAllByText('Configure')[0])
+    fireEvent.click(screen.getAllByText('Configure & launch')[0])
     expect(screen.getByText(/Attack a URL not in the graph/)).toBeTruthy()
     expect(screen.getByText('Target authentication')).toBeTruthy()
     expect(screen.getByText('Bearer token')).toBeTruthy()
@@ -90,7 +105,7 @@ describe('AI Attack Surface page', () => {
   test('opening garak (with a target) shows the four-block detail + the target row', () => {
     hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat', modelFamily: 'qwen' }]
     render(<AiAttackSurfacePage />)
-    fireEvent.click(screen.getAllByText('Configure')[0])   // garak is first
+    fireEvent.click(screen.getAllByText('Configure & launch')[0])   // garak is first
     expect(screen.getByText('1. Targets')).toBeTruthy()
     expect(screen.getByText('2. Probes')).toBeTruthy()
     expect(screen.getByText('3. Run bounds')).toBeTruthy()
@@ -100,7 +115,7 @@ describe('AI Attack Surface page', () => {
   test('opening PyRIT shows the multi-turn strategy block + Max turns', () => {
     render(<AiAttackSurfacePage />)
     // garak / pyrit / giskard each have a Configure button; pyrit is the second.
-    fireEvent.click(screen.getAllByText('Configure')[1])
+    fireEvent.click(screen.getAllByText('Configure & launch')[1])
     expect(screen.getByText('PyRIT — configure run')).toBeTruthy()
     expect(screen.getByText('2. Attack strategies')).toBeTruthy()
     expect(screen.getByText(/Crescendo/)).toBeTruthy()
@@ -110,7 +125,7 @@ describe('AI Attack Surface page', () => {
 
   test('opening giskard shows the scan detail (Probes block, Launch giskard)', () => {
     render(<AiAttackSurfacePage />)
-    fireEvent.click(screen.getAllByText('Configure')[2])   // giskard is third
+    fireEvent.click(screen.getAllByText('Configure & launch')[2])   // giskard is third
     expect(screen.getByText('giskard — configure run')).toBeTruthy()
     expect(screen.getByText('2. Probes')).toBeTruthy()      // scan style -> "Probes"
     expect(screen.getByText(/Information Disclosure/)).toBeTruthy()
@@ -123,12 +138,13 @@ describe('AI Attack Surface — garak probe selection grid', () => {
 
   const openGarak = () => {
     render(<AiAttackSurfacePage />)
-    fireEvent.click(screen.getAllByText('Configure')[0])   // garak is first
+    fireEvent.click(screen.getAllByText('Configure & launch')[0])   // garak is first
   }
 
-  test('shows the full catalog: toolbar count, a non-default family, and a description', () => {
+  test('shows the catalog: toolbar count (runnable families), a non-default family, a description', () => {
     openGarak()
-    expect(screen.getByText(/4 \/ 40 selected/)).toBeTruthy()
+    // 29 runnable = 34 catalog families minus the 5 black-box-incompatible ones.
+    expect(screen.getByText(/4 \/ 29 selected/)).toBeTruthy()
     // a family that is NOT in the default MVP set is selectable...
     expect(screen.getByText('Malware Generation (malwaregen)')).toBeTruthy()
     // ...with its description rendered.
@@ -137,14 +153,14 @@ describe('AI Attack Surface — garak probe selection grid', () => {
 
   test('Select all / Clear / Reset to defaults update the selection', () => {
     openGarak()
-    // "Select all" picks only the runnable probes — the 5 black-box-incompatible
-    // ones (audio/visual_jailbreak/glitch/fileformats/agent_breaker) are excluded.
+    // "Select all" picks the runnable probes — the 5 black-box-incompatible ones
+    // (audio/visual_jailbreak/glitch/fileformats/agent_breaker) are excluded.
     fireEvent.click(screen.getByText('Select all'))
-    expect(screen.getByText(/35 \/ 40 selected/)).toBeTruthy()
+    expect(screen.getByText(/29 \/ 29 selected/)).toBeTruthy()
     fireEvent.click(screen.getByText('Clear'))
-    expect(screen.getByText(/0 \/ 40 selected/)).toBeTruthy()
+    expect(screen.getByText(/0 \/ 29 selected/)).toBeTruthy()
     fireEvent.click(screen.getByText('Reset to defaults'))
-    expect(screen.getByText(/4 \/ 40 selected/)).toBeTruthy()
+    expect(screen.getByText(/4 \/ 29 selected/)).toBeTruthy()
   })
 
   test('launch sends exactly the four default families (and the selected target)', () => {
@@ -163,7 +179,7 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     expect(arg.targets[0]).toMatchObject({ baseurl: 'http://h:8000', path: '/v1/chat/completions' })
   })
 
-  test('Select all then launch sends the 35 runnable families (excludes incompatible)', () => {
+  test('Select all then launch sends the 29 runnable families (excludes incompatible + inactive)', () => {
     hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat' }]
     openGarak()
     fireEvent.click(screen.getByText('Select all'))
@@ -172,10 +188,14 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     fireEvent.click(screen.getByText('Launch garak'))
 
     const arg = (hookState.launch as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(arg.probes).toHaveLength(35)
-    // the black-box-incompatible probes must never be sent
+    expect(arg.probes).toHaveLength(29)
+    // black-box-incompatible probes must never be sent...
     for (const blocked of ['audio', 'visual_jailbreak', 'glitch', 'fileformats', 'agent_breaker']) {
       expect(arg.probes).not.toContain(blocked)
+    }
+    // ...nor the inactive-by-default families that would abort the run.
+    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling']) {
+      expect(arg.probes).not.toContain(dead)
     }
   })
 

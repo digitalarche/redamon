@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 from pathlib import Path
 
 from normalizer import Finding
+from proc import run_streamed
 
 from .detectors import DEFAULT_DETECTORS, detector_meta
 from .parser import parse_report
@@ -118,8 +118,4 @@ def _invoke(cfg_path):
     logger.info(f"Running giskard: {' '.join(cmd)}")
     # Belt-and-suspenders egress guard: ensure no OpenAI key leaks into the run.
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY",)}
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=DEFAULT_TIMEOUT, env=env)
-        return proc.returncode, (proc.stdout or "")[-1500:] + (proc.stderr or "")[-1500:]
-    except subprocess.TimeoutExpired:
-        return -1, f"TIMEOUT after {DEFAULT_TIMEOUT}s"
+    return run_streamed(cmd, env=env, timeout=DEFAULT_TIMEOUT, tag="giskard")

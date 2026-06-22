@@ -66,6 +66,7 @@ def run(target, bounds, output_dir: str, run_id: str,
         judge_base_url=judge_base_url,
         api_key=api_key,
         timeout=DEFAULT_TIMEOUT,
+        parallel_attempts=max(1, int(getattr(bounds, "parallelism", 2) or 2)),
     )
 
     if not report_path:

@@ -1,7 +1,8 @@
 'use client'
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react'
-import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers, Bot, Radiation } from 'lucide-react'
+import Link from 'next/link'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers, Bot, Radiation, Swords } from 'lucide-react'
 import { Toggle } from '@/components/ui'
 import { AUTO_2D_THRESHOLD } from '../GraphCanvas'
 import styles from './ViewTabs.module.css'
@@ -445,6 +446,12 @@ export const ViewTabs = memo(function ViewTabs({
           <SquareTerminal size={14} />
           <span>RedAmon Terminal</span>
         </button>
+        {/* Navigates to the dedicated AI Attack Surface page (not a graph view). */}
+        <Link href="/ai-attack-surface" className={styles.tab}>
+          <span className={styles.newBadge}>New!</span>
+          <Swords size={14} />
+          <span>AI Gauntlet</span>
+        </Link>
         <button
           role="tab"
           aria-selected={activeView === 'roe'}

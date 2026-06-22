@@ -183,12 +183,24 @@ def run() -> int:
 
             # [Phase 4] Findings -> graph
             print("[Phase 4] Findings")
-            linked = 0
+            # Index targets by (baseurl, path) so a finding can hand its Target
+            # (method + AI annotations) to the normalizer when it materialises a
+            # custom target node.
+            target_index = {}
+            for t in targets:
+                target_index.setdefault(
+                    ((t.baseurl or "").rstrip("/"), t.path or "/"), t)
+            existing = created = 0
             for f in findings:
-                if write_finding(session, f, cfg.user_id, cfg.project_id):
-                    linked += 1
+                t = target_index.get(((f.baseurl or "").rstrip("/"), f.path or "/"))
+                status = write_finding(session, f, cfg.user_id, cfg.project_id, target=t)
+                if status == "existing":
+                    existing += 1
+                elif status == "created":
+                    created += 1
             print(f"    [+] wrote {len(findings)} Vulnerability finding(s); "
-                  f"{linked} linked directly to an Endpoint")
+                  f"{existing} linked to an existing Endpoint, "
+                  f"{created} materialised a target node (all connected)")
 
         print("=" * 64)
         print(f"[*] Done. {len(targets)} target(s), {len(findings)} finding(s).")

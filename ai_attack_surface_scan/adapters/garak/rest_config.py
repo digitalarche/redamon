@@ -6,6 +6,15 @@ attack tool is pre-configured from the graph.
 """
 from __future__ import annotations
 
+import os
+
+# Cap every victim response. Without a bound, a tiny model under a DAN/jailbreak
+# prompt rambles for thousands of tokens, each generation blows past the REST
+# request_timeout (60s on CPU), every request 500s, and after enough consecutive
+# failures garak's REST generator gives up and the whole run crashes mid-probe.
+# A bounded reply is also faster and is plenty of signal for attack detection.
+RESPONSE_MAX_TOKENS = int(os.environ.get("AI_ATTACK_RESPONSE_MAX_TOKENS", "512"))
+
 
 def _family_from_target(target) -> str:
     """Infer the API family from the endpoint path (most reliable signal)."""
@@ -30,24 +39,28 @@ def _family_from_target(target) -> str:
 def _body_and_field(family: str, model: str):
     """Return (req_template_json_object, response_json_field) for a family."""
     if family == "openai-chat":
-        return ({"model": model, "messages": [{"role": "user", "content": "$INPUT"}]},
+        return ({"model": model, "max_tokens": RESPONSE_MAX_TOKENS,
+                 "messages": [{"role": "user", "content": "$INPUT"}]},
                 "$.choices[0].message.content")
     if family == "openai-completion":
-        return ({"model": model, "prompt": "$INPUT"},
+        return ({"model": model, "max_tokens": RESPONSE_MAX_TOKENS, "prompt": "$INPUT"},
                 "$.choices[0].text")
     if family == "anthropic":
-        return ({"model": model, "max_tokens": 512,
+        return ({"model": model, "max_tokens": RESPONSE_MAX_TOKENS,
                  "messages": [{"role": "user", "content": "$INPUT"}]},
                 "$.content[0].text")
     if family == "ollama-chat":
+        # Ollama's native /api/chat uses options.num_predict, not max_tokens.
         return ({"model": model, "messages": [{"role": "user", "content": "$INPUT"}],
-                 "stream": False},
+                 "stream": False, "options": {"num_predict": RESPONSE_MAX_TOKENS}},
                 "$.message.content")
     if family == "ollama-generate":
-        return ({"model": model, "prompt": "$INPUT", "stream": False},
+        return ({"model": model, "prompt": "$INPUT", "stream": False,
+                 "options": {"num_predict": RESPONSE_MAX_TOKENS}},
                 "$.response")
     # default openai-chat
-    return ({"model": model, "messages": [{"role": "user", "content": "$INPUT"}]},
+    return ({"model": model, "max_tokens": RESPONSE_MAX_TOKENS,
+             "messages": [{"role": "user", "content": "$INPUT"}]},
             "$.choices[0].message.content")
 
 
