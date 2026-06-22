@@ -157,6 +157,33 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 
 ---
 
+## AI Gauntlet (Offensive AI/LLM Testing)
+
+These red-team tools power the **AI Gauntlet** (RedAmon v5.0.0), the offensive AI/LLM testing module. garak, PyRIT, and Giskard are installed in **isolated per-tool Python virtualenvs** inside the `ai_attack_surface_scan` Docker image; promptfoo is installed as a Node.js CLI. Each is invoked as a **separate subprocess** by the scan container (mere aggregation). All four are permissively licensed (Apache-2.0 / MIT). Grading is performed by a local model served via Ollama, with zero external egress.
+
+| Tool | Purpose | License | Source Repository | How Used |
+|------|---------|---------|-------------------|----------|
+| **garak** | Broad LLM vulnerability scanner (40 probe families: prompt injection, jailbreaks, encoding bypass, data leakage, toxicity, and more) | Apache-2.0 | https://github.com/NVIDIA/garak | Installed via `pip` into `/opt/venv-garak` in `ai_attack_surface_scan/Dockerfile`; invoked as `python -m garak` (REST generator) subprocess |
+| **PyRIT** | Bounded multi-turn LLM jailbreak / risk-identification framework (crescendo, skeleton-key, TAP, many-shot) | MIT | https://github.com/Azure/PyRIT | Installed via `pip` into `/opt/venv-pyrit`; invoked via the `pyrit_run.py` runner as a subprocess |
+| **Giskard** | App-tailored LLM safety/quality scanner (prompt injection, info disclosure, hallucination, bias, sycophancy) | Apache-2.0 | https://github.com/Giskard-AI/giskard | Installed via `pip` into `/opt/venv-giskard`; invoked via the `giskard_run.py` runner as a subprocess |
+| **promptfoo** | LLM red-team eval over public attack datasets, with local encoding strategies | MIT | https://github.com/promptfoo/promptfoo | Installed via `npm install -g promptfoo` in `ai_attack_surface_scan/Dockerfile`; invoked as the `promptfoo` CLI (`redteam generate` + `eval`) |
+| **Ollama** | Local model runtime serving the judge/grader (zero-egress grading) | MIT | https://github.com/ollama/ollama | Pulled as Docker image `ollama/ollama:latest` on demand by `recon_orchestrator/local_llm_manager.py`; queried over the local network only |
+| **LiteLLM** | Routes Giskard's judge / embedding calls to the local Ollama (`ollama/<model>`) | MIT | https://github.com/BerriAI/litellm | Pulled in transitively by Giskard in `/opt/venv-giskard`; keeps all model calls local |
+
+### Judge model & red-team datasets (fetched at runtime)
+
+The judge/grader model and promptfoo's dataset plugins are **downloaded at scan time** (Ollama model pull / HuggingFace), not bundled in the RedAmon image. They are not redistributed by RedAmon; each is governed by its own upstream terms.
+
+| Resource | Purpose | License | Source | Notes |
+|----------|---------|---------|--------|-------|
+| **Qwen2.5-7B-Instruct** | Default local judge / grader model | Apache-2.0 | https://huggingface.co/Qwen/Qwen2.5-7B-Instruct | Pulled by Ollama as `qwen2.5:7b`; operator-configurable |
+| **nomic-embed-text** | Embedding model for Giskard's detectors | Apache-2.0 | https://huggingface.co/nomic-ai/nomic-embed-text-v1.5 | Pulled by Ollama when an embedding detector runs |
+| **BeaverTails** | promptfoo harmful-prompt dataset | CC-BY-NC-4.0 | https://huggingface.co/datasets/PKU-Alignment/BeaverTails | Fetched at runtime. **NonCommercial license** — review before use in a commercial engagement |
+| **HarmBench** | promptfoo standardized harmful-behavior dataset | MIT | https://github.com/centerforaisafety/HarmBench | Fetched at runtime |
+| **L1B3RT4S (Pliny)** | promptfoo jailbreak corpus | See repository | https://github.com/elder-plinius/L1B3RT4S | Community jailbreak corpus, fetched at runtime; consult the repository for current terms |
+
+---
+
 ## Anonymity & Tunneling
 
 | Tool | Purpose | License | Source Repository | How Used |
