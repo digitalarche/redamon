@@ -143,8 +143,8 @@ describe('AI Attack Surface — garak probe selection grid', () => {
 
   test('shows the catalog: toolbar count (runnable families), a non-default family, a description', () => {
     openGarak()
-    // 29 runnable = 34 catalog families minus the 5 black-box-incompatible ones.
-    expect(screen.getByText(/4 \/ 29 selected/)).toBeTruthy()
+    // 28 runnable = 33 catalog families minus the 5 black-box-incompatible ones.
+    expect(screen.getByText(/4 \/ 28 selected/)).toBeTruthy()
     // a family that is NOT in the default MVP set is selectable...
     expect(screen.getByText('Malware Generation (malwaregen)')).toBeTruthy()
     // ...with its description rendered.
@@ -156,11 +156,11 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     // "Select all" picks the runnable probes — the 5 black-box-incompatible ones
     // (audio/visual_jailbreak/glitch/fileformats/agent_breaker) are excluded.
     fireEvent.click(screen.getByText('Select all'))
-    expect(screen.getByText(/29 \/ 29 selected/)).toBeTruthy()
+    expect(screen.getByText(/28 \/ 28 selected/)).toBeTruthy()
     fireEvent.click(screen.getByText('Clear'))
-    expect(screen.getByText(/0 \/ 29 selected/)).toBeTruthy()
+    expect(screen.getByText(/0 \/ 28 selected/)).toBeTruthy()
     fireEvent.click(screen.getByText('Reset to defaults'))
-    expect(screen.getByText(/4 \/ 29 selected/)).toBeTruthy()
+    expect(screen.getByText(/4 \/ 28 selected/)).toBeTruthy()
   })
 
   test('launch sends exactly the four default families (and the selected target)', () => {
@@ -182,7 +182,7 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     expect(arg.bounds.timeout).toBe(36000)   // 600 min * 60
   })
 
-  test('Select all then launch sends the 29 runnable families (excludes incompatible + inactive)', () => {
+  test('Select all then launch sends the 28 runnable families (excludes incompatible + inactive)', () => {
     hookState.targets = [{ baseUrl: 'http://h:8000', path: '/v1/chat/completions', method: 'POST', interfaceType: 'llm-chat' }]
     openGarak()
     fireEvent.click(screen.getByText('Select all'))
@@ -191,13 +191,13 @@ describe('AI Attack Surface — garak probe selection grid', () => {
     fireEvent.click(screen.getByText('Launch garak'))
 
     const arg = (hookState.launch as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(arg.probes).toHaveLength(29)
+    expect(arg.probes).toHaveLength(28)
     // black-box-incompatible probes must never be sent...
     for (const blocked of ['audio', 'visual_jailbreak', 'glitch', 'fileformats', 'agent_breaker']) {
       expect(arg.probes).not.toContain(blocked)
     }
     // ...nor the inactive-by-default families that would abort the run.
-    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling']) {
+    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling', 'av_spam_scanning']) {
       expect(arg.probes).not.toContain(dead)
     }
   })

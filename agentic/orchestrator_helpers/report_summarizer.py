@@ -11,9 +11,13 @@ import logging
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.language_models import BaseChatModel
 
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
+
 logger = logging.getLogger(__name__)
 
 REPORT_SYSTEM_PROMPT = """You are a senior penetration testing report writer at a top-tier offensive security consultancy. Given structured security assessment data, generate thorough, professional narrative summaries for each section of a pentest report.
+
+""" + UNTRUSTED_OUTPUT_GUIDANCE + """
 
 Your writing must be:
 - Detailed and comprehensive — each section should be substantial enough to stand alone as a professional deliverable
@@ -122,7 +126,7 @@ async def generate_report_narratives(
     try:
         response = await llm.ainvoke([
             SystemMessage(content=REPORT_SYSTEM_PROMPT),
-            HumanMessage(content=f"Security assessment data:\n```json\n{json.dumps(condensed, indent=2)}\n```\n\nGenerate the report section narratives."),
+            HumanMessage(content="Security assessment data:\n" + wrap_untrusted(json.dumps(condensed, indent=2), "GRAPH_DATA") + "\n\nGenerate the report section narratives."),
         ])
 
         from orchestrator_helpers import normalize_content

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
 
-    const response = await fetch(`${RECON_ORCHESTRATOR_URL}/recon/${projectId}/partial/all`, {
+    const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/recon/${projectId}/partial/all`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     })

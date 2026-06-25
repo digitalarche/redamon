@@ -10,10 +10,12 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import docker
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from auth import is_orchestrator_request_authorized
 from container_manager import ContainerManager
 from local_llm_manager import LocalLlmManager
 from models import (
@@ -118,6 +120,35 @@ except RuntimeError:
     logger.info("Custom nuclei templates not mounted — custom templates feature disabled")
 VERSION = "1.0.0"
 
+
+def _trusted_webapp_base() -> str:
+    """The orchestrator's OWN webapp base URL for its credentialed pre-flight calls.
+
+    Never use the client-supplied ``request.webapp_api_url`` for these: it is
+    ``http://localhost:3000`` (correct for the host-network *spawned* scan
+    containers, but pointing at the orchestrator itself from here, so the call
+    silently fails and the RoE / hard-guardrail check is skipped). It is also an
+    SSRF / INTERNAL_API_KEY-leak vector (V2). After V1 the orchestrator shares a
+    network with the webapp, so ``http://webapp:3000`` resolves by DNS.
+    """
+    return os.environ.get("WEBAPP_API_URL", "http://webapp:3000").rstrip("/")
+
+
+def _spawned_webapp_url() -> str:
+    """The webapp URL forwarded to *spawned* scan containers (V2).
+
+    Spawned recon/GVM/hunt/trufflehog/ai-attack containers run on the HOST
+    network, so they reach the webapp via the host-published port
+    (``http://localhost:3000``), NOT the ``webapp`` docker DNS name (which only
+    resolves on a bridge network — that is why this differs from
+    ``_trusted_webapp_base()``).
+
+    This value is server-controlled and MUST NOT come from the request body:
+    those containers send ``INTERNAL_API_KEY`` to this URL, so trusting a
+    client-supplied ``webapp_api_url`` would be an SSRF / key-leak vector (V2).
+    """
+    return os.environ.get("SPAWNED_WEBAPP_API_URL", "http://localhost:3000").rstrip("/")
+
 # Global container manager
 container_manager: ContainerManager = None
 # On-demand local LLM (Ollama) judge/attacker for the AI Attack Surface layer
@@ -176,6 +207,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --------------------------------------------------------------------------
+# Inbound API authentication (V1-auth).
+#
+# The orchestrator holds the real Docker socket and is the privileged component.
+# Network isolation already stops bridge peers (the worker) from reaching it, but
+# a host-net peer (a compromised recon container) shares the host loopback and can
+# still reach 127.0.0.1:8010. This middleware requires a shared secret on every
+# request so only the webapp (which holds ORCHESTRATOR_API_KEY) can drive the API.
+#
+# The key is deliberately distinct from INTERNAL_API_KEY: the recon/scan containers
+# are handed INTERNAL_API_KEY, so reusing it would let a compromised recon container
+# authenticate. ORCHESTRATOR_API_KEY is shared only with the webapp.
+#
+# Fail-closed: if the key is unset, every non-exempt request is rejected.
+# --------------------------------------------------------------------------
+ORCHESTRATOR_API_KEY = os.environ.get("ORCHESTRATOR_API_KEY", "")
+
+
+@app.middleware("http")
+async def require_orchestrator_key(request: Request, call_next):
+    # /health is polled unauthenticated by the Docker healthcheck; CORS preflight
+    # (OPTIONS) carries no custom headers and is handled by the CORS middleware.
+    # The decision lives in auth.is_orchestrator_request_authorized (unit-tested).
+    if is_orchestrator_request_authorized(
+        request.url.path,
+        request.method,
+        request.headers.get("X-Orchestrator-Key", ""),
+        ORCHESTRATOR_API_KEY,
+    ):
+        return await call_next(request)
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized: missing or invalid X-Orchestrator-Key"},
+    )
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -359,7 +425,7 @@ async def start_recon(project_id: str, request: ReconStartRequest):
             except ImportError:
                 from backports import zoneinfo
 
-            url = f"{request.webapp_api_url.rstrip('/')}/api/projects/{project_id}"
+            url = f"{_trusted_webapp_base()}/api/projects/{project_id}"
             req = urllib.request.Request(url)
             req.add_header("X-Internal-Key", os.environ.get("INTERNAL_API_KEY", ""))
             with urllib.request.urlopen(req, timeout=5) as resp:
@@ -416,7 +482,7 @@ async def start_recon(project_id: str, request: ReconStartRequest):
         state = await container_manager.start_recon(
             project_id=project_id,
             user_id=request.user_id,
-            webapp_api_url=request.webapp_api_url,
+            webapp_api_url=_spawned_webapp_url(),
             recon_path=RECON_PATH,
             custom_templates_path=CUSTOM_TEMPLATES_PATH,
         )
@@ -553,7 +619,7 @@ async def start_partial_recon(project_id: str, request: PartialReconStartRequest
             except ImportError:
                 from backports import zoneinfo
 
-            url = f"{request.webapp_api_url.rstrip('/')}/api/projects/{project_id}"
+            url = f"{_trusted_webapp_base()}/api/projects/{project_id}"
             req = urllib.request.Request(url)
             req.add_header("X-Internal-Key", os.environ.get("INTERNAL_API_KEY", ""))
             with urllib.request.urlopen(req, timeout=5) as resp:
@@ -615,7 +681,7 @@ async def start_partial_recon(project_id: str, request: PartialReconStartRequest
         "include_graph_targets": request.include_graph_targets,
         "settings_overrides": request.settings_overrides,
         "user_id": request.user_id,
-        "webapp_api_url": request.webapp_api_url,
+        "webapp_api_url": _spawned_webapp_url(),
     }
 
     try:
@@ -936,14 +1002,14 @@ async def start_ai_attack_surface(project_id: str, request: AiAttackSurfaceStart
         "auth_header": request.auth_header,
         "auth_scheme": request.auth_scheme,
         "user_id": request.user_id,
-        "webapp_api_url": request.webapp_api_url,
+        "webapp_api_url": _spawned_webapp_url(),
     }
 
     try:
         state = await container_manager.start_ai_attack_surface(
             project_id=project_id,
             user_id=request.user_id,
-            webapp_api_url=request.webapp_api_url,
+            webapp_api_url=_spawned_webapp_url(),
             run_config=run_config,
             ai_attack_path=AI_ATTACK_SURFACE_PATH,
         )
@@ -1036,7 +1102,7 @@ async def start_gvm_scan(project_id: str, request: GvmStartRequest):
         state = await container_manager.start_gvm_scan(
             project_id=project_id,
             user_id=request.user_id,
-            webapp_api_url=request.webapp_api_url,
+            webapp_api_url=_spawned_webapp_url(),
             recon_path=RECON_PATH,
             gvm_scan_path=GVM_SCAN_PATH,
         )
@@ -1161,7 +1227,7 @@ async def start_github_hunt(project_id: str, request: GithubHuntStartRequest):
         state = await container_manager.start_github_hunt(
             project_id=project_id,
             user_id=request.user_id,
-            webapp_api_url=request.webapp_api_url,
+            webapp_api_url=_spawned_webapp_url(),
             github_hunt_path=GITHUB_HUNT_PATH,
         )
         return state
@@ -1285,7 +1351,7 @@ async def start_trufflehog(project_id: str, request: TrufflehogStartRequest):
         state = await container_manager.start_trufflehog(
             project_id=project_id,
             user_id=request.user_id,
-            webapp_api_url=request.webapp_api_url,
+            webapp_api_url=_spawned_webapp_url(),
             trufflehog_path=TRUFFLEHOG_PATH,
         )
         return state

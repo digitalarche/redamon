@@ -2652,6 +2652,113 @@ async def text_to_cypher(body: TextToCypherRequest):
 
 
 # =============================================================================
+# GRAPH EXEC — run a read-only, tenant-scoped graph query on behalf of the
+# worker's `redagraph` CLI, so the worker does NOT hold the Neo4j credentials
+# (DP5). ALL enforcement (read-only guard, tenant scoping, fixed schema/types
+# queries) happens here, server-side; the worker cannot bypass it. The worker
+# never controls a "raw/unscoped" path — `op` selects a fixed operation, and
+# `op=cypher` always requires a labelled node pattern + the tenant filter.
+# =============================================================================
+
+_GRAPH_LABEL_NODE_RE = re.compile(r'\(\w+:\w+')
+_graph_exec_driver = None
+
+_GRAPH_TYPES_CYPHER = (
+    "MATCH (n) "
+    "WHERE n.user_id = $tenant_user_id AND n.project_id = $tenant_project_id "
+    "UNWIND labels(n) AS label "
+    "RETURN DISTINCT label AS type ORDER BY type"
+)
+
+
+def _graph_exec_get_driver():
+    global _graph_exec_driver
+    if _graph_exec_driver is None:
+        from neo4j import GraphDatabase
+        _graph_exec_driver = GraphDatabase.driver(
+            os.environ.get("NEO4J_URI", "bolt://neo4j:7687"),
+            auth=(
+                os.environ.get("NEO4J_USER", "neo4j"),
+                os.environ.get("NEO4J_PASSWORD", "password"),
+            ),
+        )
+    return _graph_exec_driver
+
+
+def _graph_exec_coerce(v):
+    """Neo4j driver value -> JSON-serialisable primitive (mirrors redagraph)."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, (list, tuple)):
+        return [_graph_exec_coerce(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _graph_exec_coerce(x) for k, x in v.items()}
+    labels = getattr(v, "labels", None)
+    if labels is not None and hasattr(v, "items"):
+        return {"_kind": "node",
+                "labels": sorted(labels) if hasattr(labels, "__iter__") else [str(labels)],
+                "properties": {k: _graph_exec_coerce(x) for k, x in v.items()}}
+    rel_type = getattr(v, "type", None)
+    if rel_type is not None and hasattr(v, "items") and hasattr(v, "nodes"):
+        return {"_kind": "relationship", "type": str(rel_type),
+                "properties": {k: _graph_exec_coerce(x) for k, x in v.items()}}
+    if hasattr(v, "items"):
+        return {k: _graph_exec_coerce(x) for k, x in v.items()}
+    return str(v)
+
+
+class GraphExecRequest(BaseModel):
+    """Worker (redagraph) -> agent graph query. `op` selects a fixed operation
+    so arbitrary unscoped queries are impossible."""
+    op: str  # "cypher" | "types" | "schema"
+    user_id: str
+    project_id: str
+    cypher: Optional[str] = None  # only for op="cypher"
+
+
+@app.post("/graph/exec", tags=["Graph"])
+async def graph_exec(body: GraphExecRequest):
+    from graph_db.tenant_filter import find_disallowed_write_operation, inject_tenant_filter
+
+    if not body.user_id or not body.project_id:
+        return JSONResponse(status_code=400, content={"error": "missing tenant identity"})
+
+    op = body.op
+    if op == "schema":
+        # Fixed, read-only structural query — server-controlled, worker can't alter it.
+        final, params = "CALL db.schema.visualization()", {}
+    elif op == "types":
+        final = _GRAPH_TYPES_CYPHER
+        params = {"tenant_user_id": body.user_id, "tenant_project_id": body.project_id}
+    elif op == "cypher":
+        cypher = (body.cypher or "").strip()
+        if not cypher:
+            return JSONResponse(status_code=400, content={"error": "missing cypher"})
+        bad = find_disallowed_write_operation(cypher)
+        if bad:
+            return JSONResponse(status_code=403, content={"error": f"write operation rejected ({bad}); read-only"})
+        # Worker-supplied Cypher MUST carry a labelled node pattern so the tenant
+        # filter can scope it; un-scoped `MATCH (n) ...` is refused (no cross-tenant).
+        if not _GRAPH_LABEL_NODE_RE.search(cypher):
+            return JSONResponse(status_code=400, content={"error": "query has no labelled node pattern; cannot scope to tenant"})
+        final = inject_tenant_filter(cypher, body.user_id, body.project_id)
+        params = {"tenant_user_id": body.user_id, "tenant_project_id": body.project_id}
+    else:
+        return JSONResponse(status_code=400, content={"error": f"unknown op {op!r}"})
+
+    try:
+        driver = _graph_exec_get_driver()
+        with driver.session() as session:
+            result = session.run(final, params)
+            records = [{k: _graph_exec_coerce(rec[k]) for k in rec.keys()} for rec in result]
+    except Exception as e:
+        logger.error(f"graph/exec failed: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return JSONResponse(content={"records": records})
+
+
+# =============================================================================
 # KALI TERMINAL — WebSocket PTY proxy to kali-sandbox terminal server
 # =============================================================================
 

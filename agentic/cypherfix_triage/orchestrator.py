@@ -8,6 +8,7 @@ from typing import Optional
 
 import httpx
 
+from prompt_safety import wrap_untrusted
 from .state import TriageState, TriageFinding, RemediationDraft
 from .tools import TriageNeo4jToolManager, TriageWebSearchManager, TRIAGE_TOOLS
 from .prompts.cypher_queries import TRIAGE_QUERIES
@@ -108,7 +109,7 @@ class TriageOrchestrator:
 
     async def _analyze(self, state: TriageState, raw_data: dict, existing_remediations: list) -> RemediationDraft:
         """Phase 2: ReAct analysis using LLM."""
-        data_text = self._format_raw_data(raw_data)
+        data_text = wrap_untrusted(self._format_raw_data(raw_data), "GRAPH_DATA")
 
         existing_text = ""
         if existing_remediations:

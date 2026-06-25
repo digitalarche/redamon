@@ -138,7 +138,7 @@ Configured **per-user** in the webapp UI (`/settings`), not in `.env`.
 
 ## 2. Architecture at a Glance
 
-RedAmon is a fully Dockerized system with 15+ containers communicating over two internal networks.
+RedAmon is a fully Dockerized system with 15+ containers communicating over three internal networks.
 
 ### Service Topology
 
@@ -172,8 +172,19 @@ Browser ──→ Webapp (Next.js :3000) ──WebSocket──→ Agent (FastAPI
 
 | Network | Subnet | Purpose |
 |---------|--------|---------|
-| **`redamon`** | bridge (default) | All inter-service communication |
+| **`redamon`** (`redamon-network`) | bridge (default) | Inter-service communication for webapp, agent, worker, databases |
+| **`orchestrator-net`** (`redamon-orchestrator-net`) | bridge | **Isolation network** for the privileged recon-orchestrator. Shared only with the webapp (multi-homed) and the on-demand Ollama judge, so a compromised worker cannot reach the orchestration API. |
 | **`pentest-net`** | 172.28.0.0/16 | Isolated scanning network — Kali sandbox, MCP tools, and target containers (guinea pigs) |
+
+> **Worker isolation.** The `recon-orchestrator` holds the Docker socket and is
+> the privileged component. It is **not** on `redamon`; it sits alone on
+> `orchestrator-net` with only the webapp and the Ollama judge, and its host port
+> is bound to `127.0.0.1`. The `kali-sandbox` worker therefore has no path to it
+> (DNS `NXDOMAIN` + the gateway back-door is closed). The worker is not given the
+> `INTERNAL_API_KEY`, so a compromised worker holds no master credential. The
+> recon containers the orchestrator spawns receive a filtering broker socket
+> (not the raw Docker socket), so they can only create the known tool images and
+> cannot mount the host filesystem or run privileged.
 
 ### Docker Compose Services
 
@@ -540,8 +551,8 @@ All REST endpoints live in `webapp/src/app/api/`. There are 17 route groups:
 | Service | Internal URL |
 |---------|-------------|
 | Agent | `http://agent:8080` |
-| Recon Orchestrator | `http://recon-orchestrator:8010` |
-| Webapp | `http://webapp:3000` |
+| Recon Orchestrator | `http://recon-orchestrator:8010` (reachable **only from the webapp** — on `orchestrator-net`, not `redamon`) |
+| Webapp | `http://webapp:3000` (the orchestrator reaches it via its own `WEBAPP_API_URL` for RoE/guardrail pre-flight) |
 | Kali Sandbox (MCP) | `http://kali-sandbox:8000/sse` |
 | Neo4j | `bolt://neo4j:7687` |
 | PostgreSQL | `postgresql://redamon:redamon_secret@postgres:5432/redamon` |

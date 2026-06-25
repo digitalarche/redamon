@@ -4,9 +4,12 @@ redagraph — Tenant-scoped CLI for the RedAmon graph database.
 
 Runs inside kali-sandbox. Reads REDAMON_USER_ID and REDAMON_PROJECT_ID from
 the environment (injected by the terminal server when launched from the
-webapp Graph -> Terminal tab) and silently scopes every Cypher query to that
-tenant. Supports raw Cypher, natural-language questions (text-to-cypher via
-the agent), and shorthand commands like `ls <NodeType>`.
+webapp Graph -> Terminal tab) and queries the graph THROUGH THE AGENT — it
+holds no Neo4j credentials of its own. The agent's `/graph/exec` endpoint
+enforces read-only + tenant scoping server-side, so a compromised worker
+cannot write, tamper, or escape the tenant filter. Supports raw Cypher,
+natural-language questions (text-to-cypher via the agent), and shorthand
+commands like `ls <NodeType>`.
 
 Output is plain (one value per line) by default so it composes with grep,
 sort, uniq, wc, jq, and shell redirection.
@@ -17,15 +20,6 @@ import json
 import os
 import sys
 from typing import Any, Dict, List, Optional
-
-from graph_db.tenant_filter import (
-    find_disallowed_write_operation,
-    inject_tenant_filter,
-)
-
-import re
-
-_LABEL_NODE_RE = re.compile(r'\(\w+:\w+')
 
 
 def _eprint(*args, **kwargs) -> None:
@@ -44,13 +38,34 @@ def _require_tenant() -> tuple[str, str]:
     return user_id, project_id
 
 
-def _connect():
-    from neo4j import GraphDatabase
+def _agent_post(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """POST a graph operation to the agent's /graph/exec endpoint and return the
+    coerced records. The agent holds the Neo4j credentials and enforces read-only
+    + tenant scoping; this CLI never touches the database directly."""
+    import requests
 
-    uri = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
-    user = os.environ.get("NEO4J_USER", "neo4j")
-    password = os.environ.get("NEO4J_PASSWORD", "changeme123")
-    return GraphDatabase.driver(uri, auth=(user, password))
+    agent_url = os.environ.get("REDAMON_AGENT_URL", "http://agent:8080").rstrip("/")
+    try:
+        resp = requests.post(f"{agent_url}/graph/exec", json=payload, timeout=120)
+    except requests.RequestException as e:
+        _eprint(f"redagraph: cannot reach agent at {agent_url}: {e}")
+        sys.exit(4)
+
+    if resp.status_code == 200:
+        return resp.json().get("records", [])
+
+    try:
+        err = resp.json().get("error", resp.text)
+    except Exception:
+        err = resp.text
+    if resp.status_code == 403:
+        _eprint(f"redagraph: {err}")
+        sys.exit(3)
+    if resp.status_code == 400:
+        _eprint(f"redagraph: {err}")
+        sys.exit(3)
+    _eprint(f"redagraph: agent returned {resp.status_code}: {err}")
+    sys.exit(4)
 
 
 def _to_plain(value: Any) -> str:
@@ -137,64 +152,35 @@ def _emit(records: List, fmt: str, out) -> None:
             out.write("\t".join(_to_plain(_node_display(row[k])) for k in keys) + "\n")
 
 
-def _execute(cypher: str, user_id: str, project_id: str, require_labels: bool = True) -> List:
-    bad = find_disallowed_write_operation(cypher)
-    if bad:
-        _eprint(f"redagraph: write operation rejected ({bad}). This CLI is read-only.")
-        sys.exit(3)
-
-    # The tenant filter only injects on labelled node patterns. A query with no
-    # labelled patterns (e.g. `MATCH (n) RETURN n`) would run un-scoped and leak
-    # cross-tenant data. Refuse it unless the caller already wired explicit WHERE
-    # filters with $tenant_user_id / $tenant_project_id.
-    if require_labels and not _LABEL_NODE_RE.search(cypher):
-        _eprint(
-            "redagraph: query has no labelled node patterns; tenant filter cannot "
-            "scope it. Add a label, e.g. (n:Subdomain), or use `redagraph types`."
-        )
-        sys.exit(3)
-
-    filtered = inject_tenant_filter(cypher, user_id, project_id)
-    params = {"tenant_user_id": user_id, "tenant_project_id": project_id}
-
-    driver = _connect()
-    try:
-        with driver.session() as session:
-            return list(session.run(filtered, params))
-    finally:
-        driver.close()
+def _execute(cypher: str, user_id: str, project_id: str) -> List[Dict[str, Any]]:
+    """Run a labelled, read-only Cypher query via the agent. The agent enforces
+    the read-only guard, the labelled-pattern requirement, and the tenant filter
+    server-side (op="cypher"), so this CLI cannot bypass them."""
+    return _agent_post({
+        "op": "cypher",
+        "cypher": cypher,
+        "user_id": user_id,
+        "project_id": project_id,
+    })
 
 
 def cmd_whoami(args, _user_id: str, _project_id: str) -> int:
     print(f"user_id    {_user_id}")
     print(f"project_id {_project_id}")
-    print(f"neo4j_uri  {os.environ.get('NEO4J_URI', 'bolt://neo4j:7687')}")
     print(f"agent_url  {os.environ.get('REDAMON_AGENT_URL', 'http://agent:8080')}")
     return 0
 
 
 def cmd_types(args, user_id: str, project_id: str) -> int:
-    # Anonymous MATCH (n) is NOT touched by the inline-property tenant filter
-    # (the regex requires a labelled node), so use an explicit WHERE instead.
-    cypher = (
-        "MATCH (n) "
-        "WHERE n.user_id = $tenant_user_id AND n.project_id = $tenant_project_id "
-        "UNWIND labels(n) AS label "
-        "RETURN DISTINCT label AS type "
-        "ORDER BY type"
-    )
-    records = _execute(cypher, user_id, project_id, require_labels=False)
+    # Fixed, tenant-scoped query runs server-side (the agent owns the Cypher).
+    records = _agent_post({"op": "types", "user_id": user_id, "project_id": project_id})
     _emit(records, args.format, sys.stdout)
     return 0
 
 
 def cmd_schema(args, user_id: str, project_id: str) -> int:
-    driver = _connect()
-    try:
-        with driver.session() as session:
-            records = list(session.run("CALL db.schema.visualization()"))
-    finally:
-        driver.close()
+    # Fixed read-only structural query runs server-side.
+    records = _agent_post({"op": "schema", "user_id": user_id, "project_id": project_id})
     _emit(records, args.format, sys.stdout)
     return 0
 

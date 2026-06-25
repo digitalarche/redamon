@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 
 export async function GET() {
   try {
-    const response = await fetch(`${RECON_ORCHESTRATOR_URL}/health`, {
+    const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/health`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     })

@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v5.0.0-release-2E8B57?style=flat" alt="Version 5.0.0"/>
+  <img height="24" src="https://img.shields.io/badge/v5.1.0-release-2E8B57?style=flat" alt="Version 5..0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -142,7 +142,7 @@ That's it. No Node.js, Python, or security tools needed on your host.
 | **RAM** | 4 GB | 8 GB (16 GB recommended) |
 | **Disk** | 20 GB free | 50 GB free |
 
-> **Without OpenVAS** runs 6 containers: webapp, postgres, neo4j, agent, kali-sandbox, recon-orchestrator.
+> **Without OpenVAS** runs 7 containers: webapp, postgres, neo4j, agent, kali-sandbox, recon-orchestrator, and docker-broker (a filtering Docker-socket proxy that the recon orchestrator's spawned scan containers go through, so they can only launch the known tool images).
 > **With OpenVAS** adds 4 more runtime containers (gvmd, ospd-openvas, gvm-postgres, gvm-redis) plus ~8 one-shot data-init containers for vulnerability feeds (~170K+ NVTs). First launch takes ~30 minutes for GVM feed synchronization.
 > Dynamic recon and scan containers are spawned on-demand during operations and require additional resources.
 
@@ -246,6 +246,14 @@ Just run:
 ```
 
 The script pulls the latest code from GitHub, detects which Dockerfiles and source files changed, rebuilds only the affected images, and restarts the updated services. Your databases, scan results, and reports are preserved -- volumes are never deleted.
+
+> **One-time note when a release adds a new background service.** `update` re-execs the freshly-pulled script so new build/start rules apply automatically -- but only for the script version you are updating *from*. When updating *from a version that predates this self-heal* (i.e. your first update onto it), run `./redamon.sh up` once right after `update` so any newly added core service is started:
+>
+> ```bash
+> ./redamon.sh update && ./redamon.sh up
+> ```
+>
+> `up` is idempotent -- it starts only what is missing and leaves running containers untouched. After this one-time step, plain `./redamon.sh update` handles everything on its own.
 
 The webapp also checks for updates automatically and shows a notification in the UI when a new version is available.
 
@@ -800,6 +808,7 @@ flowchart TB
 |-----------|-------------|---------------|
 | **Reconnaissance Pipeline** | Parallelized fan-out/fan-in OSINT and vulnerability scanning pipeline | [README.RECON.md](readmes/README.RECON.md) |
 | **Recon Orchestrator** | Container lifecycle management via Docker SDK | [README.RECON_ORCHESTRATOR.md](readmes/README.RECON_ORCHESTRATOR.md) |
+| **Docker Socket Broker** | Filtering reverse-proxy for the Docker socket: spawned scan containers reach the daemon through it, so they can only create the known tool images (allowlisted, no host mounts / privileged / arbitrary images) | n/a |
 | **Graph Database** | Neo4j attack surface mapping with multi-tenant support | [README.GRAPH_DB.md](readmes/README.GRAPH_DB.md) · [GRAPH.SCHEMA.md](readmes/GRAPH.SCHEMA.md) |
 | **MCP Tool Servers** | Security tools via Model Context Protocol (Kali sandbox) | [README.MCP.md](readmes/README.MCP.md) |
 | **AI Agent Orchestrator** | LangGraph-based autonomous agent with ReAct pattern | [README.AGENTIC_SYSTEM.md](readmes/README.AGENTIC_SYSTEM.md) |

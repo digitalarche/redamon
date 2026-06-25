@@ -12,7 +12,7 @@ KBASE_DISABLED_FLAG_FILE="$SCRIPT_DIR/.kbase-disabled"
 LEGACY_SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
-CORE_SERVICES="postgres neo4j recon-orchestrator kali-sandbox agent webapp"
+CORE_SERVICES="postgres neo4j docker-broker recon-orchestrator kali-sandbox agent webapp"
 # Build-only images spawned on demand by the recon-orchestrator (NOT long-running
 # services). All live under the compose `tools` profile and the redamon-* tag
 # namespace. ai-attack-surface is the AI Attack Surface scanner (garak/pyrit/
@@ -138,6 +138,10 @@ ensure_auth_secrets() {
     if ! grep -q '^INTERNAL_API_KEY=' "$env_file" 2>/dev/null; then
         echo "INTERNAL_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
         info "Generated INTERNAL_API_KEY"
+    fi
+    if ! grep -q '^ORCHESTRATOR_API_KEY=' "$env_file" 2>/dev/null; then
+        echo "ORCHESTRATOR_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated ORCHESTRATOR_API_KEY"
     fi
 }
 
@@ -697,25 +701,41 @@ cmd_update() {
 
     # Save current HEAD
     local old_head new_head
-    old_head="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+    if [[ -n "${REDAMON_UPDATE_FROM:-}" ]]; then
+        # We were re-exec'd by our previous self after the pull (see below). Reuse
+        # the recorded pre-pull HEAD and do NOT pull again — just run the rebuild
+        # logic from the freshly-pulled (newer) script.
+        old_head="$REDAMON_UPDATE_FROM"
+        new_head="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+    else
+        old_head="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
 
-    # Pull latest (try upstream tracking branch first, then origin/master)
-    if ! git -C "$SCRIPT_DIR" pull --ff-only 2>/dev/null; then
-        if ! git -C "$SCRIPT_DIR" pull --ff-only origin master 2>/dev/null; then
-            error "Could not pull updates. You may have local changes."
-            echo ""
-            echo "  Try one of:"
-            echo "    git stash && ./redamon.sh update && git stash pop"
-            echo "    git commit -am 'local changes' && ./redamon.sh update"
-            exit 1
+        # Pull latest (try upstream tracking branch first, then origin/master)
+        if ! git -C "$SCRIPT_DIR" pull --ff-only 2>/dev/null; then
+            if ! git -C "$SCRIPT_DIR" pull --ff-only origin master 2>/dev/null; then
+                error "Could not pull updates. You may have local changes."
+                echo ""
+                echo "  Try one of:"
+                echo "    git stash && ./redamon.sh update && git stash pop"
+                echo "    git commit -am 'local changes' && ./redamon.sh update"
+                exit 1
+            fi
         fi
-    fi
 
-    new_head="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+        new_head="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
 
-    if [[ "$old_head" == "$new_head" ]]; then
-        success "Already up to date (v$(get_version))."
-        return
+        if [[ "$old_head" == "$new_head" ]]; then
+            success "Already up to date (v$(get_version))."
+            return
+        fi
+
+        # Self-heal across versions: re-exec the freshly-pulled script so the
+        # update logic from the version being INSTALLED runs (it may know about
+        # services or build rules this older copy does not — e.g. a new service
+        # added in the target release). Guarded by REDAMON_UPDATE_FROM so we do
+        # not pull or loop again.
+        export REDAMON_UPDATE_FROM="$old_head"
+        exec bash "$SCRIPT_DIR/redamon.sh" update
     fi
 
     local new_version
@@ -741,7 +761,7 @@ cmd_update() {
 
     if [[ "$rebuild_all" == "true" ]]; then
         info "docker-compose.yml changed -- rebuilding all images"
-        rebuild_core=(recon-orchestrator kali-sandbox agent webapp)
+        rebuild_core=(recon-orchestrator kali-sandbox agent webapp docker-broker)
         rebuild_tools=(recon vuln-scanner github-secret-hunter trufflehog-scanner ai-attack-surface)
     else
         # webapp: always needs rebuild (no volume mount in production)
@@ -770,6 +790,12 @@ cmd_update() {
             rebuild_core+=(agent)
         elif echo "$changed_files" | grep -qE "^(knowledge_base|graph_db)/"; then
             rebuild_core+=(agent)
+        fi
+
+        # docker-broker: the Docker-socket filtering proxy. Rebuild when its
+        # source changes (it builds from ./docker_broker, no volume mount).
+        if echo "$changed_files" | grep -q "^docker_broker/"; then
+            rebuild_core+=(docker-broker)
         fi
 
         # Tool-profile images (build-only, not running containers)

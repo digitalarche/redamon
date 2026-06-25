@@ -20,6 +20,7 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from state import LLMDecision, FireteamMemberState, TargetInfo, format_chain_context
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
 from orchestrator_helpers.parsing import try_parse_llm_decision
 from orchestrator_helpers.json_utils import normalize_content, json_dumps_safe
 from orchestrator_helpers.llm_retry import retry_llm_call
@@ -298,6 +299,8 @@ def _build_pending_confirmation(decision: LLMDecision, state: FireteamMemberStat
 # ---------- Prompt construction ----------
 
 _MEMBER_SYSTEM_PROMPT = """You are a Fireteam member agent specializing in a focused pentesting subtask.
+
+""" + UNTRUSTED_OUTPUT_GUIDANCE + """
 
 ## Your mission
 {task}
@@ -580,7 +583,7 @@ def _build_pending_output_section(state: FireteamMemberState) -> str:
             parts.append(
                 f"### Tool {i+1}: {s.get('tool_name', 'unknown')} ({status})\n"
                 f"Args: {json_dumps_safe(s.get('tool_args', {}))}\n"
-                f"Output:\n```\n{output}\n```"
+                f"Output:\n{wrap_untrusted(output)}"
             )
         return _MEMBER_PENDING_PLAN_OUTPUTS_SECTION.format(
             n_tools=len(plan_steps),
@@ -597,7 +600,7 @@ def _build_pending_output_section(state: FireteamMemberState) -> str:
             tool_name=prev_step.get("tool_name", ""),
             tool_args=str(prev_step.get("tool_args", {}))[:500],
             success=bool(prev_step.get("success", True)),
-            tool_output=str(prev_step.get("tool_output", ""))[:max_chars],
+            tool_output=wrap_untrusted(str(prev_step.get("tool_output", ""))[:max_chars]),
         )
 
     return ""

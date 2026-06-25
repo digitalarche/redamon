@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://recon-orchestrator:8010'
 
 async function fetchStatus(url: string) {
   try {
-    const res = await fetch(url, { cache: 'no-store' })
+    const res = await orchestratorFetch(url, { cache: 'no-store' })
     if (!res.ok) return null
     return await res.json()
   } catch {

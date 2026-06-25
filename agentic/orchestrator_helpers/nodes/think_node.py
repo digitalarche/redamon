@@ -62,6 +62,7 @@ from prompts import (
     build_tool_args_section,
 )
 from prompts.base import build_fireteam_prompt_fragments, CACHE_PREFIX_END_MARKER
+from prompt_safety import wrap_untrusted
 from utils import get_session_config_prompt
 from tools import set_tenant_context, set_phase_context, set_graph_view_context
 
@@ -606,7 +607,7 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
             tool_name=pending_step.get("tool_name", "unknown"),
             tool_args=json_dumps_safe(pending_step.get("tool_args") or {}),
             success=pending_step.get("success", False),
-            tool_output=tool_output_raw[:get_setting('TOOL_OUTPUT_MAX_CHARS', 20000)],
+            tool_output=wrap_untrusted(tool_output_raw[:get_setting('TOOL_OUTPUT_MAX_CHARS', 20000)]),
         )
         system_prompt = system_prompt + "\n" + output_section
         logger.info(f"[{user_id}/{project_id}/{session_id}] Injected output analysis section for tool: {pending_step.get('tool_name')}")
@@ -633,7 +634,7 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
             tool_outputs_parts.append(
                 f"### Tool {i+1}: {s.get('tool_name', 'unknown')} ({status})\n"
                 f"Args: {json_dumps_safe(s.get('tool_args', {}))}\n"
-                f"Output:\n```\n{output}\n```"
+                f"Output:\n{wrap_untrusted(output)}"
             )
 
         plan_section = PENDING_PLAN_OUTPUTS_SECTION.format(

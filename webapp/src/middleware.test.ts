@@ -61,6 +61,33 @@ describe('middleware - public paths', () => {
 })
 
 /* ------------------------------------------------------------------ */
+/*  Tunnel-config sync allowlist (security boundary)                   */
+/* ------------------------------------------------------------------ */
+
+describe('middleware - tunnel-config sync allowlist', () => {
+  test('allows POST /api/global/tunnel-config/sync without auth (public trigger)', async () => {
+    const req = makeRequest('/api/global/tunnel-config/sync')
+    const res = await middleware(req)
+    expect(res.status).not.toBe(401)
+    expect(res.headers.get('location')).toBeNull()
+  })
+
+  test('does NOT expose the secret-returning GET /api/global/tunnel-config', async () => {
+    // The parent path returns unmasked tunnel credentials and must stay gated.
+    // Allowlisting the /sync subpath must not leak it.
+    const req = makeRequest('/api/global/tunnel-config')
+    const res = await middleware(req)
+    expect(res.status).toBe(401)
+  })
+
+  test('does NOT allowlist sibling paths sharing the prefix', async () => {
+    const req = makeRequest('/api/global/tunnel-config/sync-evil')
+    const res = await middleware(req)
+    expect(res.status).toBe(401)
+  })
+})
+
+/* ------------------------------------------------------------------ */
 /*  Static assets                                                      */
 /* ------------------------------------------------------------------ */
 

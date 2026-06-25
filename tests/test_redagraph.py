@@ -34,6 +34,20 @@ _graph_db_stub = types.ModuleType("graph_db")
 _graph_db_stub.__path__ = [os.path.join(REPO_ROOT, "graph_db")]
 sys.modules["graph_db"] = _graph_db_stub
 
+# redagraph._agent_post does `import requests`; ensure it is importable in the
+# test env (stub if the host lacks it) so tests can patch `requests.post`.
+try:
+    import requests  # noqa: F401
+except Exception:
+    _requests_stub = types.ModuleType("requests")
+
+    class _RequestException(Exception):
+        pass
+
+    _requests_stub.RequestException = _RequestException
+    _requests_stub.post = lambda *a, **k: None
+    sys.modules["requests"] = _requests_stub
+
 tf = _load_module("graph_db.tenant_filter", os.path.join(REPO_ROOT, "graph_db", "tenant_filter.py"))
 rg = _load_module("redagraph", os.path.join(REPO_ROOT, "mcp", "servers", "redagraph.py"))
 ts = _load_module("terminal_server", os.path.join(REPO_ROOT, "mcp", "servers", "terminal_server.py"))
@@ -343,59 +357,77 @@ class TestParser(unittest.TestCase):
         self.assertEqual(ns.output, "/tmp/x.txt")
 
 
-class TestExecuteGuards(unittest.TestCase):
-    """_execute should reject writes and queries without labelled patterns."""
+def _fake_resp(status, payload):
+    r = mock.MagicMock()
+    r.status_code = status
+    r.json.return_value = payload
+    r.text = json.dumps(payload)
+    return r
 
-    def test_rejects_write(self):
-        with self.assertRaises(SystemExit) as cm:
-            rg._execute("CREATE (n:Foo)", "U", "P")
+
+class TestExecuteProxy(unittest.TestCase):
+    """_execute proxies to the agent's /graph/exec; the agent enforces read-only
+    + tenant scoping. The CLI must send the right op and surface the agent's
+    rejections with the right exit codes (write/label = 3, transport = 4)."""
+
+    def test_sends_cypher_op_and_returns_records(self):
+        with mock.patch("requests.post", return_value=_fake_resp(200, {"records": [{"x": 1}]})) as post:
+            recs = rg._execute("MATCH (n:Foo) RETURN n.x AS x", "U", "P")
+        self.assertEqual(recs, [{"x": 1}])
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["op"], "cypher")
+        self.assertEqual(body["cypher"], "MATCH (n:Foo) RETURN n.x AS x")
+        self.assertEqual(body["user_id"], "U")
+        self.assertEqual(body["project_id"], "P")
+        # The URL must hit the agent's /graph/exec, NEVER a database.
+        self.assertIn("/graph/exec", post.call_args.args[0])
+
+    def test_server_write_rejection_exits_3(self):
+        with mock.patch("requests.post", return_value=_fake_resp(403, {"error": "write operation rejected (CREATE); read-only"})):
+            with self.assertRaises(SystemExit) as cm:
+                rg._execute("CREATE (n:Foo)", "U", "P")
         self.assertEqual(cm.exception.code, 3)
 
-    def test_rejects_unlabelled_query(self):
-        with self.assertRaises(SystemExit) as cm:
-            rg._execute("MATCH (n) RETURN n", "U", "P")
+    def test_server_label_rejection_exits_3(self):
+        with mock.patch("requests.post", return_value=_fake_resp(400, {"error": "no labelled node pattern; cannot scope"})):
+            with self.assertRaises(SystemExit) as cm:
+                rg._execute("MATCH (n) RETURN n", "U", "P")
         self.assertEqual(cm.exception.code, 3)
 
-    def test_unlabelled_allowed_when_require_labels_false(self):
-        # When the caller takes responsibility for tenant scoping (e.g. cmd_types
-        # builds an explicit WHERE), require_labels=False bypasses the guard.
-        # Stop before the actual driver call.
-        with mock.patch.object(rg, "_connect") as fake_connect:
-            fake_session = mock.MagicMock()
-            fake_session.__enter__.return_value.run.return_value = []
-            fake_connect.return_value.session.return_value = fake_session
-            rg._execute(
-                "MATCH (n) WHERE n.user_id=$tenant_user_id RETURN n",
-                "U", "P", require_labels=False,
-            )
-            # confirm the driver was actually opened (i.e. we got past guards)
-            fake_connect.assert_called_once()
+    def test_unreachable_agent_exits_4(self):
+        import requests as _rq
+        with mock.patch("requests.post", side_effect=_rq.RequestException("down")):
+            with self.assertRaises(SystemExit) as cm:
+                rg._execute("MATCH (n:Foo) RETURN n", "U", "P")
+        self.assertEqual(cm.exception.code, 4)
+
+    def test_worker_holds_no_neo4j_creds(self):
+        # DP5: redagraph must not read Neo4j credentials or open a driver.
+        src = open(os.path.join(REPO_ROOT, "mcp", "servers", "redagraph.py")).read()
+        self.assertNotIn("NEO4J_PASSWORD", src)
+        self.assertNotIn("GraphDatabase", src)
 
 
-class TestCmdTypesIsTenantScoped(unittest.TestCase):
-    """Regression: cmd_types must filter on user_id/project_id. Earlier draft did not."""
+class TestCmdTypesProxied(unittest.TestCase):
+    """cmd_types / cmd_schema run as fixed server-side ops (no client Cypher)."""
 
-    def test_query_contains_explicit_tenant_where(self):
-        captured = {}
-
-        def fake_run(query, params=None):
-            captured["q"] = query
-            captured["p"] = params
-            return []
-
-        fake_session = mock.MagicMock()
-        fake_session.__enter__.return_value.run.side_effect = fake_run
-
-        with mock.patch.object(rg, "_connect") as fake_connect:
-            fake_connect.return_value.session.return_value = fake_session
+    def test_types_sends_types_op(self):
+        with mock.patch("requests.post", return_value=_fake_resp(200, {"records": []})) as post:
             args = types.SimpleNamespace(format="plain")
             with mock.patch("sys.stdout", new_callable=io.StringIO):
                 rg.cmd_types(args, "U", "P")
+        body = post.call_args.kwargs["json"]
+        self.assertEqual(body["op"], "types")
+        self.assertEqual(body["user_id"], "U")
+        self.assertEqual(body["project_id"], "P")
+        self.assertNotIn("cypher", body)  # worker does not supply the query
 
-        self.assertIn("$tenant_user_id", captured["q"])
-        self.assertIn("$tenant_project_id", captured["q"])
-        self.assertEqual(captured["p"]["tenant_user_id"], "U")
-        self.assertEqual(captured["p"]["tenant_project_id"], "P")
+    def test_schema_sends_schema_op(self):
+        with mock.patch("requests.post", return_value=_fake_resp(200, {"records": []})) as post:
+            args = types.SimpleNamespace(format="plain")
+            with mock.patch("sys.stdout", new_callable=io.StringIO):
+                rg.cmd_schema(args, "U", "P")
+        self.assertEqual(post.call_args.kwargs["json"]["op"], "schema")
 
 
 # =============================================================================

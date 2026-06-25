@@ -159,7 +159,7 @@ The recon module uses a **Docker-in-Docker (DinD)** pattern where the main recon
 
 ### How It Works
 
-The recon container shares the **host's Docker daemon** via a socket mount, meaning all containers are **siblings** managed by the same host Docker daemon.
+The recon container reaches the host's Docker daemon through a **filtering broker** rather than the raw socket. The broker validates every container-creation request — permitting only the known tool images, with mounts restricted to the shared scratch / output directories — and forwards the approved ones to the host daemon. All tool containers are therefore **siblings** managed by the same host daemon, while the recon container itself cannot create a container that mounts the host filesystem, runs privileged, or uses an unapproved image.
 
 ```mermaid
 flowchart TB
@@ -167,6 +167,8 @@ flowchart TB
         subgraph DockerDaemon["Docker Daemon (dockerd)"]
             Socket["/var/run/docker.sock"]
         end
+
+        Broker["🛡️ docker-broker<br/>validates container creates<br/>allowlisted images + scratch mounts only"]
 
         subgraph Containers["Sibling Containers"]
             Recon["redamon-recon<br/>Python Orchestrator<br/>📋 Coordinates all scans"]
@@ -181,7 +183,8 @@ flowchart TB
         Volume["📁 Shared Volume<br/>recon/output/"]
     end
 
-    Socket -.->|socket mount| Recon
+    Broker -.->|filtered socket| Recon
+    Broker -.->|approved creates| Socket
     Recon -->|docker run| NaabuC
     Recon -->|docker run| HttpxC
     Recon -->|docker run| NucleiC
@@ -1499,7 +1502,7 @@ All settings are managed through the webapp project form or via environment vari
 ### Docker Mode (Recommended)
 
 - **Docker** with Docker Compose
-- **Docker socket access** for nested container execution
+- **Docker daemon access via the filtering broker** for nested (sibling) container execution
 
 ```bash
 # Verify Docker is running

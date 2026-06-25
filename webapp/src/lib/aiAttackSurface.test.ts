@@ -71,12 +71,12 @@ describe('cards', () => {
 
   test('garak catalog excludes inactive-by-default + no-op families that abort the run', () => {
     const ids = GARAK_CARD.probes.map((p) => p.id)
-    expect(ids).toHaveLength(34)                 // full v0.15.1 minus the 6 below
+    expect(ids).toHaveLength(33)                 // full v0.15.1 minus the 7 below
     expect(new Set(ids).size).toBe(ids.length)   // unique
     expect(ids).not.toContain('test')            // no-op smoke probe
     // These garak families have ZERO active sub-probes by default, so selecting
     // one makes garak abort the WHOLE run. They must never appear in the catalog.
-    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling']) {
+    for (const dead of ['doctor', 'donotanswer', 'fitd', 'goat', 'propile', 'smuggling', 'av_spam_scanning']) {
       expect(ids, `${dead} is inactive-by-default and must be removed`).not.toContain(dead)
     }
   })
@@ -99,6 +99,15 @@ describe('cards', () => {
     for (const id of ['audio', 'visual_jailbreak', 'glitch', 'fileformats', 'agent_breaker']) {
       expect(byId.get(id)?.requires, `${id} must be flagged incompatible`).toBeTruthy()
     }
+  })
+
+  test('GPU-heavy probes carry a warning (shown as a hover alert in the UI)', () => {
+    const byId = new Map(GARAK_CARD.probes.map((p) => [p.id, p]))
+    for (const id of ['divergence', 'tap', 'realtoxicityprompts', 'atkgen']) {
+      expect(byId.get(id)?.warning, `${id} must carry a GPU warning`).toBeTruthy()
+    }
+    // a normal fast probe has none
+    expect(byId.get('dan')?.warning).toBeFalsy()
   })
 
   test('no default-selected probe is flagged incompatible (defaults must be runnable)', () => {

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import uuid
 
 from project_settings import get_setting
+from prompt_safety import wrap_untrusted
 
 
 def utc_now() -> datetime:
@@ -1185,9 +1186,11 @@ def _format_single_step(step: dict, compact: bool = False) -> List[str]:
             if tool_output:
                 max_output_len = 10000
                 if len(tool_output) > max_output_len:
-                    lines.append(f"Output (truncated):\n{tool_output[:max_output_len]}...\n[{len(tool_output) - max_output_len} more chars]")
+                    # Wrap the untrusted bytes; keep the truncation note as framework text.
+                    lines.append("Output (truncated):\n" + wrap_untrusted(tool_output[:max_output_len])
+                                 + f"\n[{len(tool_output) - max_output_len} more chars]")
                 else:
-                    lines.append(f"Output:\n{tool_output}")
+                    lines.append("Output:\n" + wrap_untrusted(tool_output))
 
         if step.get("output_analysis"):
             analysis = step["output_analysis"]
@@ -1418,7 +1421,7 @@ def format_chain_context(
 
             evidence = (f.get("evidence") or "").strip()
             if evidence:
-                lines.append(f"    Evidence: {evidence[:10000]}")
+                lines.append("    Evidence:\n" + wrap_untrusted(evidence[:10000], "EVIDENCE"))
 
             cves = f.get("related_cves") or []
             ips = f.get("related_ips") or []
@@ -1439,7 +1442,7 @@ def format_chain_context(
             ftype = fl.get("failure_type") or "error"
             err = fl.get("error_message") or ""
             lesson = fl.get("lesson_learned") or ""
-            lines.append(f"  [step {step}] {ftype}: {err[:300]}")
+            lines.append(f"  [step {step}] {ftype}: " + wrap_untrusted(err[:300], "TOOL_ERROR"))
             if lesson:
                 lines.append(f"           Lesson: {lesson[:300]}")
         lines.append("")
@@ -1671,9 +1674,10 @@ def format_chain_context(
                 if args and tool != "none":
                     lines.append(f"    Args: {str(args)[:300]}")
                 if success:
-                    out_preview = (analysis or output or "")[:10000]
-                    if out_preview:
-                        lines.append(f"    OK | {out_preview}")
+                    if analysis:
+                        lines.append(f"    OK | {analysis[:10000]}")
+                    elif output:
+                        lines.append("    OK |\n" + wrap_untrusted(str(output)[:10000]))
                     else:
                         lines.append(f"    OK")
                     # D: when analysis exists AND raw output is non-empty, the
@@ -1699,10 +1703,10 @@ def format_chain_context(
                     max_out = 5000
                     if len(last_output) > max_out:
                         lines.append(
-                            f"    Output (last tool):\n{last_output[:max_out]}..."
+                            "    Output (last tool):\n" + wrap_untrusted(str(last_output)[:max_out]) + "..."
                         )
                     else:
-                        lines.append(f"    Output (last tool):\n{last_output}")
+                        lines.append("    Output (last tool):\n" + wrap_untrusted(str(last_output)))
 
         lines.append("")
 

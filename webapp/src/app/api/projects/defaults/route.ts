@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
@@ -8,7 +9,7 @@ export async function GET() {
   try {
     // Fetch from both backends in parallel
     const [reconResult, agentResult] = await Promise.allSettled([
-      fetch(`${RECON_ORCHESTRATOR_URL}/defaults`, {
+      orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/defaults`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         cache: 'no-store',

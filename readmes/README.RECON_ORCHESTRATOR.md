@@ -253,6 +253,7 @@ The orchestrator automatically detects recon phases from log output:
 |----------|---------|-------------|
 | `RECON_PATH` | `/app/recon` | Path to recon module |
 | `RECON_IMAGE` | `redamon-recon:latest` | Docker image for recon |
+| `ORCHESTRATOR_API_KEY` | (generated) | Required `X-Orchestrator-Key` on every route except `/health`; shared only with the webapp (auto-generated in `.env`) |
 
 ### Docker Compose
 
@@ -262,7 +263,10 @@ services:
     build: .
     container_name: redamon-recon-orchestrator
     ports:
-      - "8010:8010"
+      # Loopback-only bind: reachable from the host for debugging, but NOT from
+      # bridge containers via the gateway IP — the worker cannot reach the
+      # orchestration API.
+      - "127.0.0.1:8010:8010"
     volumes:
       # Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
@@ -273,12 +277,36 @@ services:
     environment:
       - RECON_PATH=/app/recon
       - RECON_IMAGE=redamon-recon:latest
+      # Orchestrator's OWN trusted webapp URL for credentialed pre-flight calls
+      # (RoE / hard-guardrail) — never the client-supplied localhost:3000.
+      - WEBAPP_API_URL=http://webapp:3000
+      # Spawn the on-demand Ollama judge on the orchestrator's isolated network.
+      - LOCAL_LLM_NETWORK=redamon-orchestrator-net
+    networks:
+      - orchestrator-net
 
 networks:
-  default:
-    name: redamon-network
+  # Network isolation: the privileged orchestrator (Docker-socket holder) lives
+  # on its OWN network, NOT on `redamon`. Only the webapp (multi-homed) and the
+  # on-demand Ollama judge share it, so a compromised worker cannot reach the
+  # orchestration API.
+  orchestrator-net:
+    name: redamon-orchestrator-net
     external: true
 ```
+
+> **Security note.** The orchestrator holds the Docker socket and is the privileged
+> component of the system. It is network-isolated from the worker (`kali-sandbox`):
+> it sits on `redamon-orchestrator-net` (shared only with the webapp and the Ollama
+> judge) rather than the shared `redamon` network, and its host port is bound to
+> `127.0.0.1`, so a compromised worker cannot reach the orchestration API. On top of
+> isolation, every route except `/health` requires an `X-Orchestrator-Key` header
+> (held only by the webapp), so even a host-network peer that can reach
+> `127.0.0.1:8010` cannot drive the API without the key. The recon and partial-recon
+> containers it spawns do **not** receive the raw Docker socket — they mount a
+> filtering broker socket that only permits creating the known tool containers
+> (allowlisted images, scratch-directory mounts), so a compromised recon container
+> cannot mount the host filesystem, run privileged, or escape to the host.
 
 ## Container Management
 
@@ -289,8 +317,10 @@ When starting a recon, the orchestrator:
 1. Removes any existing container with the same name
 2. Creates a new container with:
    - `network_mode: host` for scanning capabilities
-   - `NET_RAW` and `NET_ADMIN` capabilities
-   - Docker socket mount for nested container execution
+   - `NET_RAW` capability only (for `masscan`/`nmap` SYN scans); the container is
+     **not** privileged, so it has no host-device or mount access
+   - Filtering broker socket (mounted at `/var/run/docker.sock`) for nested
+     (sibling) container execution, restricted to the known tool images
    - Environment variables: `PROJECT_ID`, `USER_ID`, `WEBAPP_API_URL`
 
 ### Log Streaming Implementation
@@ -335,6 +365,13 @@ The webapp proxies requests to the orchestrator:
 - `GET /api/recon/[projectId]/status` → `GET :8010/recon/{projectId}/status`
 - `GET /api/recon/[projectId]/logs` → `GET :8010/recon/{projectId}/logs` (SSE)
 
+Every orchestrator route except `/health` requires an `X-Orchestrator-Key` header
+matching `ORCHESTRATOR_API_KEY`; requests without it get `401`. The webapp injects
+the header server-side (via its `orchestratorFetch` helper) using a key shared only
+between the webapp and the orchestrator, so the proxied calls carry it automatically.
+The key is held only by those two services — the worker and spawned scan containers
+never receive it.
+
 ## Troubleshooting
 
 ### Container Won't Start
@@ -356,9 +393,10 @@ The webapp proxies requests to the orchestrator:
 
 ### Logs Not Streaming
 
-1. Verify SSE connection:
+1. Verify SSE connection (all routes except `/health` need the key header):
    ```bash
-   curl -N http://localhost:8010/recon/{projectId}/logs
+   curl -N -H "X-Orchestrator-Key: $(grep '^ORCHESTRATOR_API_KEY=' .env | cut -d= -f2)" \
+     http://localhost:8010/recon/{projectId}/logs
    ```
 
 2. Check container is running:
@@ -368,7 +406,13 @@ The webapp proxies requests to the orchestrator:
 
 ### Connection Refused from Webapp
 
-Ensure the orchestrator is on the same Docker network or accessible from the webapp container.
+The orchestrator is **not** on the shared `redamon` network — it lives on
+`redamon-orchestrator-net`, and the webapp is multi-homed onto that network to
+reach it. If the webapp cannot reach `recon-orchestrator:8010`, confirm the webapp
+is attached to `redamon-orchestrator-net` (it must be on both `redamon` and
+`redamon-orchestrator-net`). The host-published port is bound to `127.0.0.1`, so
+other containers cannot reach the orchestrator via the host gateway — this is by
+design (worker isolation); only the webapp's docker-DNS path is intended to work.
 
 ## Development
 
@@ -384,18 +428,27 @@ uvicorn api:app --host 0.0.0.0 --port 8010 --reload
 
 ### Testing Endpoints
 
+Every route except `/health` requires the `X-Orchestrator-Key` header. Export the
+key once from `.env`:
+
 ```bash
+export KEY=$(grep '^ORCHESTRATOR_API_KEY=' .env | cut -d= -f2)
+
 # Start recon
 curl -X POST http://localhost:8010/recon/test-project/start \
+  -H "X-Orchestrator-Key: $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "user-1", "webapp_api_url": "http://localhost:3000"}'
+  -d '{"user_id": "user-1"}'
 
 # Check status
-curl http://localhost:8010/recon/test-project/status
+curl -H "X-Orchestrator-Key: $KEY" http://localhost:8010/recon/test-project/status
 
 # Stream logs (Ctrl+C to stop)
-curl -N http://localhost:8010/recon/test-project/logs
+curl -N -H "X-Orchestrator-Key: $KEY" http://localhost:8010/recon/test-project/logs
 
 # Stop recon
-curl -X POST http://localhost:8010/recon/test-project/stop
+curl -X POST -H "X-Orchestrator-Key: $KEY" http://localhost:8010/recon/test-project/stop
+
+# Health is the one exempt route (no key needed)
+curl http://localhost:8010/health
 ```

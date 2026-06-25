@@ -65,6 +65,7 @@ except Exception:
 
 from logging_config import get_logger
 from orchestrator_helpers.json_utils import normalize_content
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
 
 logger = get_logger(__name__)
 
@@ -1228,7 +1229,8 @@ _SUMMARY_PROMPT = (
     "pentest agent can decide when to consult it. Output 250-350 tokens.\n"
     "Mention: domains covered (web, AD, cloud, mobile, ...), structure "
     "(per-CVE, per-payload, per-technique), and the kinds of pentest queries "
-    "it answers best. No marketing language. No first person."
+    "it answers best. No marketing language. No first person.\n\n"
+    + UNTRUSTED_OUTPUT_GUIDANCE
 )
 
 
@@ -1398,8 +1400,9 @@ async def verify_resource(
                 f"URL: {url}\n"
                 f"Detected type: {rtype}\n\n"
                 f"Homepage / README excerpt (first 6000 chars):\n"
-                f"{content_excerpt}\n\n"
-                f"Sample page titles from sitemap (first 50):\n  - {sample_titles}\n"
+                + wrap_untrusted(content_excerpt, "WEB_CONTENT") + "\n\n"
+                + "Sample page titles from sitemap (first 50):\n"
+                + wrap_untrusted("  - " + sample_titles, "WEB_CONTENT") + "\n"
             )
             try:
                 resp = await llm.ainvoke([

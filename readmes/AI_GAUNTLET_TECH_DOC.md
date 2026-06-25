@@ -359,7 +359,7 @@ version-sensitive `attempt` rows).
 The table covers garak's full 0.15.x catalog (promptinject→LLM01, leakreplay→LLM02,
 sysprompt_extraction→LLM07, packagehallucination→LLM03, ansiescape→LLM05, …) with a
 `LLM01 / prompt-injection / classifier` fallback for unknown families. Some families
-are graded by the local judge (`tap`, `goat`, `malwaregen`, `exploitation`); the
+are graded by the local judge (`tap`, `malwaregen`, `exploitation`); the
 egress guard keeps that judge on Ollama.
 
 ```mermaid
@@ -868,7 +868,7 @@ description, and chip. What is selectable per tool:
 
 | Tool | Selectable units (UI ids) | Default-checked |
 |---|---|---|
-| garak | 35 visible probe families (promptinject, dan, encoding, leakreplay, latentinjection, goodside, doctor, grandma, dra, fitd, phrasing, suffix, tap, goat, sata, sysprompt_extraction, apikey, propile, divergence, smuggling, realtoxicityprompts, lmrc, continuation, donotanswer, atkgen, topic, malwaregen, exploitation, av_spam_scanning, ansiescape, web_injection, badchars, packagehallucination, misleading, snowball) | promptinject, dan, encoding, leakreplay |
+| garak | 28 visible probe families (promptinject, dan, encoding, leakreplay, latentinjection, goodside, grandma, dra, phrasing, suffix, tap, sata, sysprompt_extraction, apikey, divergence, realtoxicityprompts, lmrc, continuation, atkgen, topic, malwaregen, exploitation, ansiescape, web_injection, badchars, packagehallucination, misleading, snowball) — inactive-by-default families (doctor, donotanswer, fitd, goat, propile, smuggling, av_spam_scanning) are excluded as they abort the run | promptinject, dan, encoding, leakreplay |
 | pyrit | crescendo, skeleton_key, tap, many_shot | crescendo |
 | giskard | prompt_injection, information_disclosure, hallucination, harmfulness, stereotypes, sycophancy, output_formatting | prompt_injection |
 | promptfoo | pliny, beavertails, harmbench | pliny |

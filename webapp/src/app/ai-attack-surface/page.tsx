@@ -366,6 +366,11 @@ export default function AiAttackSurfacePage() {
                       <span className={styles.probeName}>
                         {p.label}
                         {blocked && <span className={styles.probeBadge}>needs {p.requires}</span>}
+                        {p.warning && (
+                          <span className={styles.probeWarn} title={p.warning}>
+                            <AlertTriangle size={13} />
+                          </span>
+                        )}
                       </span>
                       <span className={styles.probeDesc}>{p.description}</span>
                       <span className={styles.probeChip}><Chip chip={p.chip} /></span>

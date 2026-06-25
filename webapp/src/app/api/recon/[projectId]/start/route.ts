@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 const WEBAPP_URL = process.env.WEBAPP_URL || 'http://localhost:3000'
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // Call recon orchestrator to start the recon
-    const response = await fetch(`${RECON_ORCHESTRATOR_URL}/recon/${projectId}/start`, {
+    const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/recon/${projectId}/start`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from .tool_registry import TOOL_REGISTRY
+from prompt_safety import UNTRUSTED_OUTPUT_GUIDANCE
 
 
 # =============================================================================
@@ -763,6 +764,8 @@ You work step-by-step using the Thought-Tool-Output pattern:
 2. **Action**: Select and execute the appropriate tool
 3. **Observation**: Analyze the tool output
 4. **Reflection**: Update your understanding and todo list
+
+""" + UNTRUSTED_OUTPUT_GUIDANCE + """
 
 ## Current Phase: {current_phase}
 

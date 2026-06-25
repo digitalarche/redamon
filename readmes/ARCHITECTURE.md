@@ -256,7 +256,7 @@ flowchart TB
 | PostgreSQL | localhost:5432 | Primary database (Prisma) |
 | Neo4j Browser | http://localhost:7474 | Graph database UI for attack surface visualization |
 | Neo4j Bolt | localhost:7687 | Neo4j driver protocol (used by agent) |
-| Recon Orchestrator | http://localhost:8010 | Manages recon pipeline containers |
+| Recon Orchestrator | http://localhost:8010 | Manages recon pipeline containers. **Network-isolated:** on its own `redamon-orchestrator-net` (not `redamon`) and bound to `127.0.0.1` only — reachable from the host and the webapp, but not from the worker. |
 | Agent API | http://localhost:8090 | AI agent WebSocket + REST API |
 | MCP Network Recon | http://localhost:8000 | curl + naabu (HTTP probing, port scanning) |
 | MCP Nuclei | http://localhost:8002 | Nuclei vulnerability scanner |

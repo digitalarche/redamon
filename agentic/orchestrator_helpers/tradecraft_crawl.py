@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from logging_config import get_logger
 from orchestrator_helpers.json_utils import normalize_content
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
 
 logger = get_logger(__name__)
 
@@ -242,6 +243,8 @@ Prefer high-signal paths (technique pages, payload writeups, tool guides,
 CVE analyses). Avoid low-signal (login, blog metadata, author bios,
 empty archive index pages).
 
+""" + UNTRUSTED_OUTPUT_GUIDANCE + """
+
 Site:    {base}
 Just visited: {current}  (depth {depth})
 
@@ -291,8 +294,8 @@ async def _llm_decide(
         calls_remaining=calls_remaining,
         seconds_remaining=seconds_remaining,
         sitemap_len=len(state.sitemap),
-        sitemap_sample=sitemap_sample,
-        links_block=links_block,
+        sitemap_sample=wrap_untrusted(sitemap_sample, "WEB_CONTENT"),
+        links_block=wrap_untrusted(links_block, "WEB_CONTENT"),
         search_box=hints.get("search_box", False),
         pagination=hints.get("pagination", False),
         tag_cloud=hints.get("tag_cloud", []),

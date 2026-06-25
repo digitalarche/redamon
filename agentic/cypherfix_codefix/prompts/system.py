@@ -1,5 +1,7 @@
 """System prompt for the CodeFix agent."""
 
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
+
 
 def build_codefix_system_prompt(remediation: dict, repo_structure: str, settings) -> str:
     cve_ids = ', '.join(remediation.get('cveIds', [])) if remediation.get('cveIds') else 'N/A'
@@ -16,6 +18,8 @@ Do NOT plan everything upfront. Instead, explore iteratively:
 1. GATHER CONTEXT: Read files, search patterns, understand the codebase architecture
 2. TAKE ACTION: Make targeted edits to fix the vulnerability
 3. VERIFY RESULTS: Run tests/linting if available, re-read edited files to confirm correctness
+
+""" + UNTRUSTED_OUTPUT_GUIDANCE + f"""
 
 # Environment
 
@@ -41,7 +45,8 @@ Do NOT plan everything upfront. Instead, explore iteratively:
 Title: {remediation.get('title', 'Unknown')}
 Type: {remediation.get('remediationType', 'code_fix')}
 Severity: {remediation.get('severity', 'medium')}
-Description: {remediation.get('description', '')}
+Description:
+{wrap_untrusted(remediation.get('description', ''), "FINDING")}
 
 CVE IDs: {cve_ids}
 
@@ -52,7 +57,7 @@ AI-Suggested Solution:
 {remediation.get('solution', 'No solution provided.')}
 
 Evidence:
-{remediation.get('evidence', 'No evidence provided.')}
+{wrap_untrusted(remediation.get('evidence', 'No evidence provided.'), "EVIDENCE")}
 
 # Repository Structure (top-level)
 {repo_structure}

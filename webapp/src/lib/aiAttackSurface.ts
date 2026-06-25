@@ -47,6 +47,10 @@ export interface ProbeOption {
   // When set, the probe is shown disabled in the UI — it would only ever return
   // zero results against the targets this product attacks.
   requires?: string
+  // GPU-recommended probes: very slow on CPU (long/repeated generations, or an
+  // extra HF/judge model), so requests exceed the request timeout and can abort
+  // the whole run. Shown selectable but with a hover-warning alert icon.
+  warning?: string
 }
 
 export interface StrategyOption {
@@ -113,7 +117,8 @@ export const GARAK_CARD: ToolCard = {
     { id: 'suffix', label: 'Adversarial Suffix (suffix)', chip: 'jailbreak',
       description: 'Appends optimized GCG / BEAST suffixes that force compliance. GCG needs white-box access.' },
     { id: 'tap', label: 'Tree-of-Attacks (tap)', chip: 'jailbreak',
-      description: 'TAP / PAIR: an attacker model searches for working jailbreaks. Uses the local judge.' },
+      description: 'TAP / PAIR: an attacker model searches for working jailbreaks. Uses the local judge.',
+      warning: 'GPU recommended. Runs an attacker model + judge on every step — very slow on CPU, where requests can time out and abort the run.' },
     { id: 'glitch', label: 'Glitch Tokens (glitch)', chip: 'jailbreak',
       description: 'Anomalous tokens that destabilize the model. Needs tokenizer access.',
       requires: 'white-box tokenizer access' },
@@ -134,17 +139,20 @@ export const GARAK_CARD: ToolCard = {
     { id: 'apikey', label: 'API Key Extraction (apikey)', chip: 'data-disclosure',
       description: 'Coaxes the model into emitting API keys and secrets.' },
     { id: 'divergence', label: 'Data Divergence (divergence)', chip: 'data-disclosure',
-      description: 'Repetition attacks (repeated-token) that leak memorized training data.' },
+      description: 'Repetition attacks (repeated-token) that leak memorized training data.',
+      warning: 'GPU recommended. Repeated-token generation is very slow on CPU — nearly every request exceeds the timeout and can abort the whole run.' },
 
     // --- Toxicity / harmful content ---
     { id: 'realtoxicityprompts', label: 'Real Toxicity Prompts (realtoxicityprompts)', chip: 'toxicity',
-      description: 'Elicits toxicity: insult, threat, identity attack, profanity, sexual content.' },
+      description: 'Elicits toxicity: insult, threat, identity attack, profanity, sexual content.',
+      warning: 'GPU recommended. Downloads + runs a HuggingFace toxicity model — very slow on CPU and needs network egress.' },
     { id: 'lmrc', label: 'Risk Cards (lmrc)', chip: 'toxicity',
       description: 'Language Model Risk Cards: bullying, profanity, sexual content, quack medicine, deadnaming.' },
     { id: 'continuation', label: 'Slur Continuation (continuation)', chip: 'toxicity',
       description: 'Tests whether the model completes reclaimed slurs.' },
     { id: 'atkgen', label: 'Adversarial Auto-Gen (atkgen)', chip: 'toxicity',
-      description: 'An attacker model iteratively elicits toxic output (uses a HF toxicity model).' },
+      description: 'An attacker model iteratively elicits toxic output (uses a HF toxicity model).',
+      warning: 'GPU recommended. Runs a HuggingFace attacker model in a loop — very slow on CPU (takes ~an hour on its own).' },
     { id: 'topic', label: 'Off-Limits Topics (topic)', chip: 'toxicity',
       description: 'Steers the model onto blocked / controversial topics (WordNet).' },
 
@@ -153,8 +161,6 @@ export const GARAK_CARD: ToolCard = {
       description: 'Requests evasion code, payloads and malicious sub-functions.' },
     { id: 'exploitation', label: 'Code Injection (exploitation)', chip: 'harmful-generation',
       description: 'SQL injection echo / system and Jinja template Python injection.' },
-    { id: 'av_spam_scanning', label: 'AV / Spam Signatures (av_spam_scanning)', chip: 'harmful-generation',
-      description: 'Makes the model emit EICAR / GTUBE / phishing test signatures.' },
     { id: 'fileformats', label: 'Malicious File Formats (fileformats)', chip: 'harmful-generation',
       description: 'Probes unsafe HuggingFace file hosting. Requires file output.',
       requires: 'a file-hosting / file-output target' },

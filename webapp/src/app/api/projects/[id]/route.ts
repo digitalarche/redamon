@@ -5,6 +5,7 @@ import { unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { getSession } from '@/app/api/graph/neo4j'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 // Path to output directories (fallback for local deletion)
 const RECON_OUTPUT_PATH = process.env.RECON_OUTPUT_PATH || '/home/samuele/Progetti didattici/RedAmon/recon/output'
@@ -219,7 +220,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     // 2. Delete all output JSON files via orchestrator (it has write permissions)
     //    This covers: recon, GVM, and GitHub Secret Hunt JSON files
     try {
-      const orchestratorResponse = await fetch(`${RECON_ORCHESTRATOR_URL}/project/${id}/files`, {
+      const orchestratorResponse = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/project/${id}/files`, {
         method: 'DELETE',
       })
       if (orchestratorResponse.ok) {

@@ -31,6 +31,13 @@ ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m|\033\[[0-9;]*m')
 # Maximum number of concurrent partial recon runs per project
 MAX_PARALLEL_PARTIAL_RECONS = 12
 
+# V4: recon/partial-recon containers mount this BROKER socket as their
+# /var/run/docker.sock instead of the raw host socket. The docker-broker service
+# serves it here (on the shared /tmp/redamon dir) and filters container-create
+# requests so a compromised worker cannot escape to the host. Overridable for
+# tests / alternate layouts.
+BROKER_SOCKET_HOST = os.environ.get("RECON_DOCKER_BROKER_SOCKET", "/tmp/redamon/.broker/docker.sock")
+
 # Maximum number of concurrent AI Attack Surface jobs per project. The four core
 # tools may run together (they share one ref-counted judge), so the cap is a
 # runaway-spawn backstop, not a typical-use limit.
@@ -239,11 +246,20 @@ class ContainerManager:
                 name=container_name,
                 detach=True,
                 network_mode="host",
-                privileged=True,
+                # Not privileged: Docker's default capability set already includes
+                # NET_RAW, which is all the native masscan/nmap SYN scans need. Full
+                # `privileged` (all ~40 caps + host device access + seccomp disabled +
+                # /proc unmasked) was a host-escape primitive the recon container did
+                # not need; dropping it leaves the benign default caps intact.
+                cap_add=["NET_RAW"],
                 environment={
                     "PROJECT_ID": project_id,
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
+                    # V3: operator-approved extra tool images (empty = strict
+                    # shipped-only allowlist). Server-controlled; forwarded to the
+                    # recon pipeline so air-gapped/private-registry deployments work.
+                    "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
                     "UPDATE_GRAPH_DB": "true",
                     # HOST_RECON_OUTPUT_PATH: Required for nested Docker containers (naabu, httpx, etc.)
                     # These run as sibling containers and need host paths for volume mounts
@@ -259,7 +275,11 @@ class ContainerManager:
                     "AGENT_API_URL": os.environ.get("AGENT_API_URL", "http://localhost:8090"),
                 },
                 volumes={
-                    "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
+                    # V4: mount the BROKER's filtered socket as /var/run/docker.sock,
+                    # NOT the raw host socket. The recon code still does `docker run`
+                    # unchanged, but a compromised worker cannot mount / or run a
+                    # privileged/arbitrary container — the broker rejects those.
+                    BROKER_SOCKET_HOST: {"bind": "/var/run/docker.sock", "mode": "rw"},
                     # Mount source code for development (no rebuild needed)
                     # Note: rw needed because output/data are subdirectories
                     f"{recon_path}": {"bind": "/app/recon", "mode": "rw"},
@@ -762,7 +782,12 @@ class ContainerManager:
                 name=container_name,
                 detach=True,
                 network_mode="host",
-                privileged=True,
+                # Not privileged: Docker's default capability set already includes
+                # NET_RAW, which is all the native masscan/nmap SYN scans need. Full
+                # `privileged` (all ~40 caps + host device access + seccomp disabled +
+                # /proc unmasked) was a host-escape primitive the recon container did
+                # not need; dropping it leaves the benign default caps intact.
+                cap_add=["NET_RAW"],
                 environment={
                     "PROJECT_ID": project_id,
                     "USER_ID": config.get("user_id", ""),
@@ -784,7 +809,11 @@ class ContainerManager:
                     "AGENT_API_URL": os.environ.get("AGENT_API_URL", "http://localhost:8090"),
                 },
                 volumes={
-                    "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
+                    # V4: mount the BROKER's filtered socket as /var/run/docker.sock,
+                    # NOT the raw host socket. The recon code still does `docker run`
+                    # unchanged, but a compromised worker cannot mount / or run a
+                    # privileged/arbitrary container — the broker rejects those.
+                    BROKER_SOCKET_HOST: {"bind": "/var/run/docker.sock", "mode": "rw"},
                     f"{recon_path}": {"bind": "/app/recon", "mode": "rw"},
                     f"{Path(recon_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
                     "/tmp/redamon": {"bind": "/tmp/redamon", "mode": "rw"},
@@ -1153,6 +1182,10 @@ class ContainerManager:
                     "PROJECT_ID": project_id,
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
+                    # V3: operator-approved extra tool images (empty = strict
+                    # shipped-only allowlist). Server-controlled; forwarded to the
+                    # recon pipeline so air-gapped/private-registry deployments work.
+                    "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
                     "PYTHONUNBUFFERED": "1",
                     "AI_ATTACK_CONFIG": str(config_path),
                     "AI_ATTACK_RUN_ID": run_id,
@@ -1507,6 +1540,10 @@ class ContainerManager:
                     "PROJECT_ID": project_id,
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
+                    # V3: operator-approved extra tool images (empty = strict
+                    # shipped-only allowlist). Server-controlled; forwarded to the
+                    # recon pipeline so air-gapped/private-registry deployments work.
+                    "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
                     "PYTHONUNBUFFERED": "1",
                     # Forward Neo4j credentials from orchestrator environment
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
@@ -1895,6 +1932,10 @@ class ContainerManager:
                     "PROJECT_ID": project_id,
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
+                    # V3: operator-approved extra tool images (empty = strict
+                    # shipped-only allowlist). Server-controlled; forwarded to the
+                    # recon pipeline so air-gapped/private-registry deployments work.
+                    "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
                     "PYTHONUNBUFFERED": "1",
                     # Forward Neo4j credentials from orchestrator environment
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
@@ -2269,6 +2310,10 @@ class ContainerManager:
                     "PROJECT_ID": project_id,
                     "USER_ID": user_id,
                     "WEBAPP_API_URL": webapp_api_url,
+                    # V3: operator-approved extra tool images (empty = strict
+                    # shipped-only allowlist). Server-controlled; forwarded to the
+                    # recon pipeline so air-gapped/private-registry deployments work.
+                    "RECON_EXTRA_ALLOWED_IMAGES": os.environ.get("RECON_EXTRA_ALLOWED_IMAGES", ""),
                     "PYTHONUNBUFFERED": "1",
                     # Forward Neo4j credentials from orchestrator environment
                     "NEO4J_URI": os.environ.get("NEO4J_URI", "bolt://localhost:7687"),

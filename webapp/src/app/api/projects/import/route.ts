@@ -5,6 +5,7 @@ import JSZip from 'jszip'
 import { randomUUID } from 'crypto'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import path from 'path'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 export const maxDuration = 300
 
@@ -430,7 +431,7 @@ export async function POST(request: NextRequest) {
           const uploadFormData = new FormData()
           uploadFormData.append('file', blob, `${mapping.type}_${newProject.id}.json`)
 
-          const response = await fetch(
+          const response = await orchestratorFetch(
             `${RECON_ORCHESTRATOR_URL}/project/${newProject.id}/artifacts/${mapping.type}`,
             { method: 'POST', body: uploadFormData }
           )

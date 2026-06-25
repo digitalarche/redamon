@@ -1,6 +1,10 @@
 """System prompt for the triage ReAct analysis phase."""
 
+from prompt_safety import UNTRUSTED_OUTPUT_GUIDANCE
+
 TRIAGE_SYSTEM_PROMPT = """You are a vulnerability triage analyst for RedAmon, a security reconnaissance platform.
+
+""" + UNTRUSTED_OUTPUT_GUIDANCE + """
 
 # Task
 You have been given raw data collected from a Neo4j graph database containing security reconnaissance results. Your job is to:

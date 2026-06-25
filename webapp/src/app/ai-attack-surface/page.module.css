@@ -114,6 +114,8 @@
 .probeCard input { margin-top: 3px; flex-shrink: 0; }
 .probeBody { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; align-self: stretch; }
 .probeName { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+/* GPU-recommended warning: red alert icon, message on hover (title tooltip) */
+.probeWarn { display: inline-flex; align-items: center; color: #ef4444; cursor: help; }
 .probeDesc { font-size: 12px; opacity: 0.6; line-height: 1.35; }
 .probeChip { margin-top: auto; padding-top: 6px; display: flex; justify-content: flex-start; }
 

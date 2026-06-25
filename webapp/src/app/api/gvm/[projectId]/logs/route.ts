@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
 
   // Proxy the SSE stream from the recon orchestrator
-  const response = await fetch(`${RECON_ORCHESTRATOR_URL}/gvm/${projectId}/logs`, {
+  const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/gvm/${projectId}/logs`, {
     headers: {
       'Accept': 'text/event-stream',
     },

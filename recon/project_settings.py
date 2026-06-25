@@ -700,6 +700,67 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# V3 — tool Docker image allowlist (anti image-injection)
+# ---------------------------------------------------------------------------
+# Recon modules read `*_DOCKER_IMAGE` from project settings and pass them
+# verbatim to `docker run` on the host Docker daemon (often with `--net=host`).
+# These settings are user-editable (Prisma columns + project-settings UI) and
+# flow from the webapp API, so an unvalidated value is arbitrary-container
+# execution on the host. We pin every tool image to a known-good allowlist at the
+# settings chokepoint (`fetch_project_settings`).
+#
+# The allowlist is the set of images we ship (derived from DEFAULT_SETTINGS so it
+# stays in sync as tools are added/bumped) PLUS any images the *operator* approves
+# server-side via the `RECON_EXTRA_ALLOWED_IMAGES` env var (comma-separated). The
+# env is server-controlled (set on the orchestrator / spawned recon container),
+# NOT attacker-influenceable like project settings — so air-gapped / private-
+# registry deployments can keep their custom mirror images (e.g.
+# `myregistry.local/naabu:latest`) without re-opening the injection hole.
+ALLOWED_TOOL_IMAGES = frozenset(
+    v for k, v in DEFAULT_SETTINGS.items()
+    if k.endswith('_DOCKER_IMAGE') and isinstance(v, str) and v
+)
+
+
+def _operator_allowed_images() -> frozenset:
+    """Operator-approved extra images from `RECON_EXTRA_ALLOWED_IMAGES` (env)."""
+    raw = os.environ.get('RECON_EXTRA_ALLOWED_IMAGES', '')
+    return frozenset(part.strip() for part in raw.split(',') if part.strip())
+
+
+def sanitize_image_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Force every `*_DOCKER_IMAGE` setting to a known-good image (V3).
+
+    Allowed = shipped images (``ALLOWED_TOOL_IMAGES``) plus operator-approved
+    images from ``RECON_EXTRA_ALLOWED_IMAGES``. A value outside that set is
+    replaced with the shipped default for that key (or dropped if the key is
+    unknown, so the consumer falls back to its own hardcoded default). Mutates and
+    returns ``settings``.
+    """
+    allowed = ALLOWED_TOOL_IMAGES | _operator_allowed_images()
+    for key in list(settings.keys()):
+        if not key.endswith('_DOCKER_IMAGE'):
+            continue
+        value = settings.get(key)
+        if isinstance(value, str) and value in allowed:
+            continue  # allowlisted — keep
+        safe = DEFAULT_SETTINGS.get(key)
+        if safe is not None:
+            logger.warning(
+                f"[guardrail] Rejected non-allowlisted Docker image for {key}: "
+                f"{value!r} -> pinned to {safe!r}"
+            )
+            settings[key] = safe
+        else:
+            logger.warning(
+                f"[guardrail] Dropped unknown Docker image setting {key}={value!r} "
+                f"(no shipped default; consumer will use its own)"
+            )
+            del settings[key]
+    return settings
+
+
 def _fetch_user_api_key(user_id: str, webapp_url: str, key_name: str) -> str:
     """Fetch an unmasked API key from user's global settings."""
     import requests as _req
@@ -1435,6 +1496,10 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
             elif settings[key] > roe_max_rps:
                 logger.info(f"RoE: capping {key} from {settings[key]} to {roe_max_rps} rps")
                 settings[key] = roe_max_rps
+
+    # V3: reject any attacker-influenced tool Docker image before it can reach
+    # `docker run` on the host daemon.
+    sanitize_image_settings(settings)
 
     logger.info(f"Loaded {len(settings)} settings for project {project_id}")
     return settings

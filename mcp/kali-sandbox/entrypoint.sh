@@ -3,6 +3,12 @@ set -e
 
 echo "[*] Starting RedAmon MCP container..."
 
+# V7: run from a WRITABLE working directory, not the now read-only
+# /opt/mcp_servers source mount. MCP processes (and the tools/agent terminal they
+# spawn) inherit this cwd, so relative-path output lands in /tmp instead of
+# failing on the read-only mount. Imports are unaffected (PYTHONPATH is absolute).
+cd /tmp
+
 # Tunnel manager API first (instant, runs in background).
 # Allows the webapp to push tunnel config at any time during boot.
 python3 /opt/mcp_servers/tunnel_manager.py &
@@ -46,34 +52,20 @@ deferred_init() {
     fi
 
     WEBAPP_URL="${WEBAPP_API_URL:-http://webapp:3000}"
-    echo "[*] [deferred] Fetching tunnel config from webapp..."
-    TUNNEL_CONFIG=""
+    echo "[*] [deferred] Requesting tunnel config sync from webapp..."
+    # The worker holds no secrets. Instead of PULLING credentials (which would
+    # require the internal key to live in this least-trusted container), we ask
+    # the webapp to PUSH the saved tunnel config to our tunnel-manager on port
+    # 8015. Best-effort: if the webapp is not up yet, tunnels can still be
+    # (re)applied at any time from Global Settings > Tunneling.
     for i in $(seq 1 30); do
-        TUNNEL_CONFIG=$(curl -sf "${WEBAPP_URL}/api/global/tunnel-config" 2>/dev/null) && break
-        echo "[*] [deferred] Waiting for webapp... (attempt $i/30)"
+        if curl -sf -X POST "${WEBAPP_URL}/api/global/tunnel-config/sync" > /dev/null 2>&1; then
+            echo "[*] [deferred] Tunnel config sync requested"
+            break
+        fi
+        [ "$i" -eq 30 ] && echo "[*] [deferred] Webapp not reachable for tunnel sync; configure tunnels in Global Settings > Tunneling"
         sleep 2
     done
-
-    if [ -n "$TUNNEL_CONFIG" ] && [ "$TUNNEL_CONFIG" != '{}' ] && [ "$TUNNEL_CONFIG" != '{"ngrokAuthtoken":"","chiselServerUrl":"","chiselAuth":""}' ]; then
-        echo "[*] [deferred] Applying tunnel config from database..."
-        PUSH_OK=false
-        for j in $(seq 1 3); do
-            if curl -sf -X POST http://localhost:8015/tunnel/configure \
-                -H 'Content-Type: application/json' \
-                -d "$TUNNEL_CONFIG" > /dev/null 2>&1; then
-                PUSH_OK=true
-                break
-            fi
-            echo "[!] [deferred] Tunnel config push failed (attempt $j/3), retrying..."
-            sleep 2
-        done
-        if [ "$PUSH_OK" = "false" ]; then
-            echo "[!] [deferred] Failed to apply tunnel config after 3 attempts; tunnels will not start automatically"
-            echo "[!] [deferred] Configure tunnels in Global Settings > Tunneling (changes push immediately)"
-        fi
-    else
-        echo "[*] [deferred] No tunnel credentials configured (set them in Global Settings > Tunneling)"
-    fi
 
     echo "[*] [deferred] Initialization complete"
 }
@@ -84,4 +76,4 @@ echo "[*] Starting terminal WebSocket server..."
 python3 /opt/mcp_servers/terminal_server.py &
 
 echo "[*] Starting MCP servers..."
-exec python3 run_servers.py "$@"
+exec python3 /opt/mcp_servers/run_servers.py "$@"

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
 
@@ -10,7 +11,7 @@ interface RouteParams {
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
   try {
-    const response = await fetch(`${RECON_ORCHESTRATOR_URL}/ai-attack-surface/${projectId}/all`, {
+    const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/ai-attack-surface/${projectId}/all`, {
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
     })
