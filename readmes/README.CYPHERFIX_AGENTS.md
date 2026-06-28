@@ -464,8 +464,8 @@ flowchart LR
         WRITE[github_write\nFile creation/overwrite]
     end
 
-    subgraph Execute["Execute"]
-        BASH[github_bash\nShell commands\nFull runtime access]
+    subgraph Execute["Execute (isolated sandbox)"]
+        BASH[github_bash\nShell commands\nrun via docker exec in\nephemeral secret-free sandbox]
     end
 ```
 
@@ -478,7 +478,7 @@ flowchart LR
 | `github_read` | Read file with line numbers | cat -n format, tracks files in `state.files_read` for edit pre-check |
 | `github_edit` | Exact string replacement | Generates `DiffBlock`, streams to frontend, triggers approval flow |
 | `github_write` | Create or overwrite file | Creates parent directories, adds to `state.files_modified` |
-| `github_bash` | Shell command execution | Blocks dangerous patterns (`rm -rf /`, `mkfs.`), 600s timeout |
+| `github_bash` | Shell command execution | **Runs in an isolated per-job sandbox container** (secret-free, network-isolated, `cap_drop=ALL`, read-only rootfs), driven via `docker exec` through the webapp→orchestrator path — never in the agent. 600s timeout. The old in-agent shell + 4-pattern blocklist is removed (closes T6/E10) |
 | `github_list_dir` | List directory contents | Type indicators (file/dir) |
 | `github_symbols` | Tree-sitter AST symbols | Supports 15 languages, extracts functions/classes/methods with line ranges |
 | `github_find_definition` | Find symbol definitions | AST-based, skips node_modules/vendor/__pycache__ |
@@ -488,6 +488,30 @@ flowchart LR
 **Execution strategy:**
 - **Parallel**: Search and read tools run concurrently via `asyncio.gather()`
 - **Sequential**: Edit, write, and bash tools run one at a time (edit triggers approval check)
+
+### Build Sandbox Isolation (threats T6 / E10)
+
+A cloned repo is **untrusted external input** (malicious `postinstall` scripts, prompt-injected build instructions). Of the 11 tools, only `github_bash` *executes* repo content — so its execution is moved out of the agent container (which holds `INTERNAL_API_KEY`, Neo4j/Postgres creds, every per-user LLM key, and the GitHub token) into a dedicated sandbox.
+
+```mermaid
+flowchart LR
+    AGENT["agent\nLLM control loop\n(holds secrets)"] -->|"github_bash(cmd)"| WEBAPP["webapp\nX-Internal-Key"]
+    WEBAPP -->|"X-Orchestrator-Key"| ORCH["recon-orchestrator\n(real docker socket)"]
+    ORCH -->|"docker exec"| SBX["codefix-sandbox\nephemeral · secret-free\ncap_drop=ALL · no-new-privileges\nread-only rootfs · codefix-net"]
+    AGENT -. "clone / edit / commit / push\n(token stays here)" .-> WORK[("shared work dir\nrepo rw · .git ro")]
+    SBX --- WORK
+```
+
+Key properties:
+
+- **Per-job, ephemeral.** A `redamon-codefix-<job>` container is spawned at the start of a run and destroyed on completion / disconnect / TTL (a reaper cleans orphans).
+- **No secrets.** The sandbox environment is empty — a full RCE during a build finds nothing to steal.
+- **No internal reach.** It sits on an isolated `codefix-net` bridge with NAT egress (so `npm`/`pip` installs work) but **no RedAmon peer** — it cannot reach webapp/Neo4j/Postgres/agent.
+- **Hardened runtime.** `cap_drop=ALL`, `security_opt=no-new-privileges`, read-only rootfs (writable tmpfs + worktree only), non-root user, CPU/memory/PID limits.
+- **Command channel is the docker control plane**, not a shared network: the agent cannot reach the orchestrator directly, so requests flow `agent → webapp (X-Internal-Key) → orchestrator (X-Orchestrator-Key) → docker exec`. This preserves the rule that only the webapp holds the orchestrator key.
+- **Token isolation.** Clone/commit/push run on the agent side with the token via `GIT_ASKPASS`; the sandbox mounts the worktree (`.git` read-only) and never sees the token.
+
+If the sandbox image (`redamon-codefix-sandbox:latest`, built via `docker compose --profile tools build`) is missing, `github_bash` is cleanly disabled (file edits still work) — it never falls back to in-agent execution.
 
 ### Diff Block & Approval Flow
 
@@ -542,21 +566,23 @@ sequenceDiagram
 
 The `GitHubRepoManager` handles all Git and GitHub operations:
 
+All git invocations run with hooks disabled (`-c core.hooksPath=/dev/null`) so a malicious cloned repo cannot plant a hook that fires on commit/push.
+
 ```mermaid
 flowchart LR
-    CLONE["clone()\n--depth 50\ntoken-based HTTPS"] --> BRANCH["create_branch()\ncypherfix/{rem_id}"]
+    CLONE["clone()\n--depth 50\ntoken via GIT_ASKPASS\n(not in URL)"] --> BRANCH["create_branch()\ncypherfix/{rem_id}"]
     BRANCH --> EDIT["Agent edits files\nvia github_edit"]
-    EDIT --> COMMIT["commit()\ngit add -A\nauthor: CypherFix"]
-    COMMIT --> PUSH["push()\n--force origin\n(allows re-runs)"]
+    EDIT --> COMMIT["commit()\nstages ONLY approved files\nauthor: CypherFix"]
+    COMMIT --> PUSH["push()\n--force origin\nbranch allow-list"]
     PUSH --> PR["create_pr()\nPyGithub API\n422 → update existing"]
 ```
 
 | Operation | Details |
 |-----------|---------|
-| **Clone** | Shallow clone to `/tmp/cypherfix-repos/{owner_repo}`, removes existing dir, 120s timeout |
+| **Clone** | Shallow clone to the shared work dir `{CODEFIX_WORK_BASE}/{job}/repo` (the build sandbox mounts this; `.git` mounted read-only). Token supplied via `GIT_ASKPASS` — **never in the clone URL or `.git/config`**. Removes existing dir, 120s timeout |
 | **Branch** | `git checkout -b cypherfix/{remediation_id}` |
-| **Commit** | Author: `CypherFix <cypherfix@redamon.io>`, stages all changes |
-| **Push** | Force-push (allows re-runs on same branch), token sanitized from errors |
+| **Commit** | Author: `CypherFix <cypherfix@redamon.io>`. **Stages only the LLM's approved files (`state.files_modified`) — never `git add -A`**, so build artifacts or files a malicious build slipped into the worktree cannot reach the PR |
+| **Push** | Force-push (allows re-runs on same branch). **Branch allow-list**: refused if the target is the default branch / `main` / `master`, or does not match the configured fix-branch prefix (closes T7). Token sanitized from errors |
 | **PR** | Creates via GitHub API; if 422 (already exists), finds and updates existing PR |
 
 ### CodeFix State Model

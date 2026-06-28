@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import uuid
 
 from project_settings import get_setting
-from prompt_safety import wrap_untrusted
+from prompt_safety import wrap_untrusted, wrap_untrusted_inline
 
 
 def utc_now() -> datetime:
@@ -1560,7 +1560,7 @@ def format_chain_context(
                         if raw:
                             fp = str(raw).replace("\n", " ").strip()[:60]
                             if fp:
-                                entry = f"{entry} -> {fp}"
+                                entry = f"{entry} -> {wrap_untrusted_inline(fp)}"
                     digest_parts.append(entry)
                 if digest_parts:
                     lines.append(f"      tools: {'; '.join(digest_parts)}")
@@ -1607,9 +1607,11 @@ def format_chain_context(
                         # 12 "FAILED" lines aren't all the same to the LLM.
                         ec = t.get("error_class") or ""
                         ec_str = f"[{ec}] " if ec and ec != "success" else ""
-                        failed_tools.append(
-                            f"{tname}{diag}: {ec_str}{(t.get('error_message') or '')[:300]}"
-                        )
+                        # error_message can echo target-controlled bytes (a server
+                        # banner, an HTTP error body), so wrap it like any tool output.
+                        emsg = (t.get('error_message') or '')[:300]
+                        emsg_part = wrap_untrusted_inline(emsg, "TOOL_ERROR") if emsg else ""
+                        failed_tools.append(f"{tname}{diag}: {ec_str}{emsg_part}")
                     targs = t.get("tool_args") or {}
                     if targs:
                         args_line = f"    - {tname}{diag}: {str(targs)[:300]}"
@@ -1647,7 +1649,7 @@ def format_chain_context(
                     for args_line, preview in tool_entries:
                         lines.append(args_line)
                         if preview:
-                            lines.append(f"      -> {preview}")
+                            lines.append(f"      -> {wrap_untrusted_inline(preview)}")
 
                 # Failures
                 for ft in failed_tools:
@@ -1688,13 +1690,15 @@ def format_chain_context(
                     if analysis and output:
                         raw_preview = str(output).replace("\n", " ").strip()[:300]
                         if raw_preview:
-                            lines.append(f"    Raw: {raw_preview}")
+                            lines.append(f"    Raw: {wrap_untrusted_inline(raw_preview)}")
                 else:
                     # Tag the FAILED line with error_class so the LLM
                     # distinguishes a shell-quoting glitch from a real 4xx.
                     ec = tool_entry.get("error_class") or ""
                     ec_str = f"[{ec}] " if ec and ec != "success" else ""
-                    lines.append(f"    FAILED | {ec_str}{err[:300]}")
+                    # error_message can echo target-controlled bytes — wrap it.
+                    err_part = wrap_untrusted_inline(err[:300], "TOOL_ERROR") if err else ""
+                    lines.append(f"    FAILED | {ec_str}{err_part}")
 
             # Full output for the very last iteration's last tool
             if is_last:

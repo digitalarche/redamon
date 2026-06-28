@@ -86,7 +86,7 @@ export function RemediationDetail({
         <SolutionSection remediation={remediation} />
 
         {/* CodeFix */}
-        <CodeFixButton remediation={remediation} onStartCodeFix={onStartCodeFix} missingSettings={missingSettings} />
+        <CodeFixButton remediation={remediation} onStartCodeFix={onStartCodeFix} missingSettings={missingSettings} projectId={projectId} />
       </div>
     </div>
   )

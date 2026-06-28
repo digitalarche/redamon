@@ -1,50 +1,29 @@
-"""Bash tool: subprocess execution with safety."""
+"""Bash tool: runs build/test commands in the isolated CodeFix sandbox (T6/E10).
 
-import asyncio
-import os
-import re
+A cloned repo is untrusted external input (poisoned postinstall scripts,
+prompt-injected build steps). Running its build commands inside the agent
+container would expose INTERNAL_API_KEY, the Neo4j/Postgres creds, every per-user
+LLM key, and the GitHub token. So this tool does NOT execute locally: it forwards
+the command to an ephemeral, secret-free, network-isolated sandbox via the webapp
+passthrough. The sandbox is the security boundary; there is no local blocklist to
+bypass because nothing runs here.
+"""
 
-BLOCKED_PATTERNS = [
-    r'rm\s+(-rf?\s+)?/',
-    r'mkfs\.',
-    r'dd\s+if=',
-    r'>\s*/dev/',
-]
+from .. import sandbox_client
 
 
 async def github_bash(state, command: str, timeout: int = 120000) -> str:
-    """Run a shell command in the cloned repo directory."""
-    timeout_seconds = min(timeout / 1000, 600)
+    """Run a shell command in the job's build sandbox (not the agent container)."""
+    if not getattr(state, "job_id", ""):
+        return "Error: build sandbox is not available for this session; cannot run commands."
 
-    for pattern in BLOCKED_PATTERNS:
-        if re.search(pattern, command):
-            return f"Error: Command blocked for safety reasons: {command}"
+    # Tool contract passes timeout in milliseconds; the sandbox takes seconds.
+    timeout_seconds = max(1, min(int(timeout / 1000), 600))
 
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(state.repo_path),
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
+    result = await sandbox_client.run_bash(state.job_id, command, timeout_seconds)
+    output = result.get("output", "")
+    exit_code = result.get("exit_code", 0)
 
-        try:
-            stdout, _ = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            return f"Error: Command timed out after {timeout_seconds}s: {command}"
-
-        output = stdout.decode('utf-8', errors='replace')
-        exit_code = proc.returncode
-
-        result = output
-        if exit_code != 0:
-            result += f"\n\n[Exit code: {exit_code}]"
-
-        return result
-
-    except Exception as e:
-        return f"Error executing command: {type(e).__name__}: {str(e)}"
+    if exit_code not in (0, None):
+        output += f"\n\n[Exit code: {exit_code}]"
+    return output or "[no output]"

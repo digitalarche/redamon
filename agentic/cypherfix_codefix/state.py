@@ -40,6 +40,9 @@ class CodeFixState:
         self.user_id: str = ""
         self.project_id: str = ""
         self.session_id: str = ""
+        # Identifies the per-job CodeFix build sandbox (T6/E10). Set in
+        # CodeFixOrchestrator.run(); used to route github_bash into the sandbox.
+        self.job_id: str = ""
         self.repo_path: Optional[Path] = None
         self.repo_url: str = ""
         self.branch_name: str = ""

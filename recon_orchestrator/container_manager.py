@@ -41,6 +41,10 @@ MAX_PARALLEL_PARTIAL_RECONS = 12
 # for tests / alternate layouts.
 BROKER_SOCKET_VOLUME = os.environ.get("RECON_DOCKER_BROKER_VOLUME", "redamon_broker_socket")
 
+# Where the cypherfix-work volume is mounted INSIDE the orchestrator container.
+# Used to clean up per-job worktrees (the same volume the agent clones into).
+CODEFIX_WORK_CONTAINER_BASE = os.environ.get("CODEFIX_WORK_CONTAINER_BASE", "/app/codefix-work")
+
 # Maximum number of concurrent AI Attack Surface jobs per project. The four core
 # tools may run together (they share one ref-counted judge), so the cap is a
 # runaway-spawn backstop, not a typical-use limit.
@@ -128,6 +132,22 @@ class ContainerManager:
         # (Step 1). The AI attack lifecycle ref-counts a judge lease through it.
         self.local_llm_manager = None
         self._log_tasks: dict[str, asyncio.Task] = {}
+
+        # CodeFix build sandboxes (T6/E10): ephemeral, hardened, secret-free
+        # containers that run the UNTRUSTED clone+build+test step of the CypherFix
+        # agent. job_id -> {"container_id", "created_at"}.
+        self.codefix_sandbox_image = os.environ.get("CODEFIX_SANDBOX_IMAGE", "redamon-codefix-sandbox:latest")
+        self.codefix_sandbox_network = os.environ.get("CODEFIX_SANDBOX_NETWORK", "redamon-codefix-net")
+        self.codefix_sandbox_mem = os.environ.get("CODEFIX_SANDBOX_MEM", "2g")
+        self.codefix_sandbox_nanocpus = int(os.environ.get("CODEFIX_SANDBOX_NANOCPUS", str(2_000_000_000)))
+        self.codefix_sandbox_pids = int(os.environ.get("CODEFIX_SANDBOX_PIDS", "512"))
+        # Max lifetime before the reaper force-removes a sandbox (orphaned by a
+        # crashed agent). Generous because real builds can be slow.
+        self.codefix_sandbox_ttl = int(os.environ.get("CODEFIX_SANDBOX_TTL", "3600"))
+        # Host path of the cypherfix-work volume (set by api.py after mount
+        # auto-detection) — used to bind per-job worktrees into the sandbox.
+        self.codefix_work_host_base: Optional[str] = None
+        self.codefix_sandboxes: dict[str, dict] = {}
 
     def _get_container_name(self, project_id: str) -> str:
         """Generate container name for a project"""
@@ -315,6 +335,195 @@ class ContainerManager:
             logger.error(f"Failed to start recon for {project_id}: {e}")
 
         return state
+
+    # =======================================================================
+    # CodeFix build sandbox (T6/E10)
+    #
+    # Runs the UNTRUSTED clone+build+test step of the CypherFix agent in an
+    # ephemeral, hardened, SECRET-FREE container so a malicious repo (poisoned
+    # postinstall / prompt-injected build steps) cannot reach the platform's
+    # secrets. Spawned via the orchestrator's REAL docker socket (like GVM), with
+    # hardening enforced here. The agent drives it via `docker exec` (the command
+    # channel is the docker control plane, NOT a shared network), so the sandbox
+    # sits on codefix-net with NO RedAmon peer.
+    # =======================================================================
+
+    @staticmethod
+    def _safe_job_id(job_id: str) -> str:
+        # No dots: the job_id becomes a host path segment for the bind mount, so a
+        # `..` would let a malicious caller mount an arbitrary host dir into the
+        # sandbox. The orchestrator uses the REAL docker socket (no broker), so
+        # this sanitization is the only guard.
+        safe = re.sub(r'[^a-zA-Z0-9_-]', '_', job_id or "")
+        return safe or "codefix"
+
+    def _codefix_sandbox_name(self, job_id: str) -> str:
+        return f"redamon-codefix-{self._safe_job_id(job_id)}"
+
+    def _ensure_codefix_network(self) -> None:
+        """Create the isolated CodeFix network if it does not exist.
+
+        Docker Compose never creates this network: by design NO service is
+        attached to it (the sandbox must have no RedAmon peer), and Compose only
+        creates networks used by the services it starts. So the orchestrator owns
+        its lifecycle — create-if-missing here, idempotently, before every spawn.
+        """
+        name = self.codefix_sandbox_network
+        try:
+            self.client.networks.get(name)
+            return
+        except NotFound:
+            pass
+        try:
+            self.client.networks.create(name, driver="bridge", check_duplicate=True)
+            logger.info(f"[codefix] created isolated network {name}")
+        except APIError as e:
+            # A concurrent spawn may have just created it — tolerate the race.
+            logger.warning(f"[codefix] network ensure for {name}: {e}")
+
+    def start_codefix_sandbox(self, job_id: str) -> dict:
+        """Spawn a hardened, secret-free build sandbox for one CodeFix job.
+
+        The agent has already cloned the repo into
+        ``<codefix_work_host_base>/<job_id>/repo`` (shared volume). We bind that
+        worktree read-write and its ``.git`` read-only (so a build cannot plant a
+        commit hook or rewrite ``.git/config``). Returns the container name the
+        orchestrator will ``exec`` into.
+        """
+        if not self.codefix_work_host_base:
+            raise RuntimeError("codefix_work_host_base not configured")
+
+        job_id = self._safe_job_id(job_id)
+
+        # Compose does not create the isolated network (no service is attached);
+        # ensure it exists before we attach the sandbox to it.
+        self._ensure_codefix_network()
+
+        # Tear down any stale sandbox for the same job first (idempotent restart).
+        if job_id in self.codefix_sandboxes:
+            self.stop_codefix_sandbox(job_id, remove_workdir=False)
+
+        host_repo_path = f"{self.codefix_work_host_base}/{job_id}/repo"
+        name = self._codefix_sandbox_name(job_id)
+
+        # Best-effort: a leftover container with this name blocks the run.
+        try:
+            old = self.client.containers.get(name)
+            old.remove(force=True)
+        except NotFound:
+            pass
+        except APIError as e:
+            logger.warning(f"[codefix] could not remove stale container {name}: {e}")
+
+        container = self.client.containers.run(
+            self.codefix_sandbox_image,
+            name=name,
+            detach=True,
+            network=self.codefix_sandbox_network,
+            # HARDENING: drop every capability and make the root fs read-only
+            # (only the worktree + a tmpfs are writable). Privilege escalation is
+            # blocked by stripping setuid/setgid bits in the image rather than the
+            # `no-new-privileges` flag, which breaks execve for non-root users on
+            # snap-Docker/AppArmor hosts.
+            cap_drop=["ALL"],
+            read_only=True,
+            # Writable scratch for package caches ($HOME=/tmp in the image). exec is
+            # allowed because some installers compile/run helpers from the cache.
+            tmpfs={"/tmp": "size=1g,exec"},
+            mem_limit=self.codefix_sandbox_mem,
+            nano_cpus=self.codefix_sandbox_nanocpus,
+            pids_limit=self.codefix_sandbox_pids,
+            # CRITICAL: NO secrets. A full RCE in here finds nothing of value.
+            environment={},
+            volumes={
+                host_repo_path: {"bind": "/work/repo", "mode": "rw"},
+                f"{host_repo_path}/.git": {"bind": "/work/repo/.git", "mode": "ro"},
+            },
+            # Image CMD is `sleep infinity`; commands arrive via exec.
+        )
+
+        self.codefix_sandboxes[job_id] = {
+            "container_id": container.id,
+            "created_at": datetime.now(timezone.utc),
+        }
+        logger.info(f"[codefix] started sandbox {name} ({container.id[:12]}) for job {job_id}")
+        return {"job_id": job_id, "container": name}
+
+    async def exec_codefix_sandbox(self, job_id: str, command: str, timeout: int = 600) -> dict:
+        """Run one shell command inside the job's sandbox via `docker exec`.
+
+        Wrapped in `timeout` so a hung build cannot block forever. Returns merged
+        stdout/stderr and the exit code (124 on timeout).
+        """
+        job_id = self._safe_job_id(job_id)
+        entry = self.codefix_sandboxes.get(job_id)
+        if not entry:
+            return {"output": f"Error: no active CodeFix sandbox for job {job_id}", "exit_code": 1}
+
+        # Clamp to a hard ceiling regardless of caller-supplied value.
+        timeout = max(1, min(int(timeout), 1800))
+
+        def _run() -> dict:
+            try:
+                container = self.client.containers.get(entry["container_id"])
+                rc, output = container.exec_run(
+                    # -k 10: if the build ignores SIGTERM, SIGKILL it 10s later.
+                    ["timeout", "-k", "10", str(timeout), "bash", "-c", command],
+                    workdir="/work/repo",
+                    demux=False,
+                )
+                text = output.decode("utf-8", errors="replace") if output else ""
+                if rc == 124:
+                    text += f"\n\n[Command timed out after {timeout}s]"
+                return {"output": text, "exit_code": rc}
+            except NotFound:
+                return {"output": f"Error: CodeFix sandbox for job {job_id} is gone", "exit_code": 1}
+            except APIError as e:
+                return {"output": f"Error executing in sandbox: {e}", "exit_code": 1}
+
+        return await asyncio.to_thread(_run)
+
+    def stop_codefix_sandbox(self, job_id: str, remove_workdir: bool = True) -> None:
+        """Remove the sandbox container and (optionally) the per-job worktree."""
+        job_id = self._safe_job_id(job_id)
+        entry = self.codefix_sandboxes.pop(job_id, None)
+        if entry:
+            try:
+                container = self.client.containers.get(entry["container_id"])
+                container.remove(force=True)
+                logger.info(f"[codefix] removed sandbox for job {job_id}")
+            except NotFound:
+                pass
+            except APIError as e:
+                logger.warning(f"[codefix] failed removing sandbox for job {job_id}: {e}")
+
+        if remove_workdir:
+            self._remove_codefix_workdir(job_id)
+
+    def _remove_codefix_workdir(self, job_id: str) -> None:
+        """Delete the per-job worktree via the orchestrator's own volume mount."""
+        import shutil
+        safe = self._safe_job_id(job_id)
+        path = os.path.join(CODEFIX_WORK_CONTAINER_BASE, safe)
+        # Guard against path escaping the base.
+        if os.path.commonpath([os.path.abspath(path), CODEFIX_WORK_CONTAINER_BASE]) != CODEFIX_WORK_CONTAINER_BASE:
+            logger.warning(f"[codefix] refusing to remove suspicious workdir: {path}")
+            return
+        try:
+            shutil.rmtree(path, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"[codefix] failed removing workdir {path}: {e}")
+
+    async def reap_codefix_sandboxes(self) -> None:
+        """Remove sandboxes older than the TTL (orphaned by a crashed agent)."""
+        now = datetime.now(timezone.utc)
+        stale = [
+            job_id for job_id, e in list(self.codefix_sandboxes.items())
+            if (now - e["created_at"]).total_seconds() > self.codefix_sandbox_ttl
+        ]
+        for job_id in stale:
+            logger.info(f"[codefix] reaping stale sandbox for job {job_id}")
+            self.stop_codefix_sandbox(job_id)
 
     def _cleanup_sub_containers(self) -> int:
         """Stop and remove any running sub-containers (naabu, httpx, nuclei, etc.)
@@ -643,6 +852,12 @@ class ContainerManager:
                     await self.stop_ai_attack_surface(project_id, run_id, timeout=5)
                 except Exception as e:
                     logger.error(f"Error cleaning up AI attack {project_id}/{run_id}: {e}")
+        # CodeFix build sandboxes (T6/E10) — ephemeral; remove any still tracked.
+        for job_id in list(self.codefix_sandboxes.keys()):
+            try:
+                self.stop_codefix_sandbox(job_id)
+            except Exception as e:
+                logger.error(f"Error cleaning up CodeFix sandbox {job_id}: {e}")
 
     # =========================================================================
     # Partial Recon Container Lifecycle

@@ -118,6 +118,13 @@ try:
 except RuntimeError:
     CUSTOM_TEMPLATES_PATH = ""
     logger.info("Custom nuclei templates not mounted — custom templates feature disabled")
+# Host path of the cypherfix-work volume — needed to bind per-job worktrees into
+# the CodeFix build sandbox (T6/E10). Optional: empty disables the feature.
+try:
+    CODEFIX_WORK_PATH = _get_host_path(_host_mounts, "/app/codefix-work", "CODEFIX_WORK_PATH")
+except RuntimeError:
+    CODEFIX_WORK_PATH = ""
+    logger.info("CodeFix work volume not mounted — CodeFix sandbox feature disabled")
 VERSION = "1.0.0"
 
 
@@ -169,6 +176,10 @@ async def _ai_attack_reaper():
                     await container_manager.reap_ai_attack()
                 except Exception as e:
                     logger.warning(f"AI attack reaper iteration failed: {e}")
+                try:
+                    await container_manager.reap_codefix_sandboxes()
+                except Exception as e:
+                    logger.warning(f"CodeFix sandbox reaper iteration failed: {e}")
     except asyncio.CancelledError:
         pass
 
@@ -183,6 +194,8 @@ async def lifespan(app: FastAPI):
     local_llm_manager = LocalLlmManager(client=container_manager.client)
     # The AI Attack Surface lifecycle ref-counts an Ollama judge lease through it.
     container_manager.local_llm_manager = local_llm_manager
+    # CodeFix build sandbox (T6/E10): host path of the shared cypherfix-work volume.
+    container_manager.codefix_work_host_base = CODEFIX_WORK_PATH
     reaper = asyncio.create_task(_ai_attack_reaper())
     yield
     logger.info("Shutting down Recon Orchestrator...")
@@ -294,6 +307,49 @@ async def local_llm_release():
         raise HTTPException(status_code=503, detail="Local LLM manager not initialized")
     status = await asyncio.to_thread(local_llm_manager.release)
     return status.to_dict()
+
+
+# --------------------------------------------------------------------------
+# CodeFix build sandbox (T6/E10)
+#
+# The agent (via the webapp passthrough) drives an ephemeral, secret-free,
+# network-isolated build sandbox for the UNTRUSTED clone+build step of CypherFix.
+# All three routes are protected by the orchestrator-key middleware (only the
+# webapp holds the key), so the agent reaches them only through the webapp.
+# --------------------------------------------------------------------------
+
+
+@app.post("/codefix-sandbox/{job_id}/start")
+async def codefix_sandbox_start(job_id: str):
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Container manager not initialized")
+    if not container_manager.codefix_work_host_base:
+        raise HTTPException(status_code=503, detail="CodeFix sandbox feature not configured (work volume not mounted)")
+    try:
+        return await asyncio.to_thread(container_manager.start_codefix_sandbox, job_id)
+    except Exception as e:
+        logger.error(f"[codefix] start failed for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start CodeFix sandbox: {e}")
+
+
+@app.post("/codefix-sandbox/{job_id}/exec")
+async def codefix_sandbox_exec(job_id: str, request: Request):
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Container manager not initialized")
+    body = await request.json()
+    command = body.get("command")
+    if not command:
+        raise HTTPException(status_code=400, detail="Missing 'command'")
+    timeout = int(body.get("timeout", 600))
+    return await container_manager.exec_codefix_sandbox(job_id, command, timeout)
+
+
+@app.post("/codefix-sandbox/{job_id}/stop")
+async def codefix_sandbox_stop(job_id: str):
+    if not container_manager:
+        raise HTTPException(status_code=503, detail="Container manager not initialized")
+    await asyncio.to_thread(container_manager.stop_codefix_sandbox, job_id)
+    return {"job_id": job_id, "stopped": True}
 
 
 @app.get("/defaults")

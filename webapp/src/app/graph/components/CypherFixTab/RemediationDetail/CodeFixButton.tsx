@@ -1,7 +1,8 @@
 'use client'
 
 import { memo } from 'react'
-import { Code, GitPullRequest, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-react'
+import Link from 'next/link'
+import { Code, GitPullRequest, ExternalLink, AlertTriangle, RefreshCw, Settings } from 'lucide-react'
 import type { Remediation } from '@/lib/cypherfix-types'
 import styles from './RemediationDetail.module.css'
 
@@ -9,12 +10,14 @@ interface CodeFixButtonProps {
   remediation: Remediation
   onStartCodeFix: (remediationId: string) => void
   missingSettings?: string[]
+  projectId?: string
 }
 
 export const CodeFixButton = memo(function CodeFixButton({
   remediation,
   onStartCodeFix,
   missingSettings = [],
+  projectId,
 }: CodeFixButtonProps) {
   // If PR already exists, show link instead
   if (remediation.prUrl) {
@@ -96,6 +99,18 @@ export const CodeFixButton = memo(function CodeFixButton({
           <span>
             Missing settings: {missingSettings.join(', ')}.
             Update your project settings in the CypherFix tab to enable CodeFix.
+            {projectId && (
+              <>
+                {' '}
+                <Link
+                  href={`/projects/${projectId}/settings?tab=cypherfix`}
+                  className={styles.settingsLink}
+                >
+                  <Settings size={12} />
+                  Open CypherFix settings
+                </Link>
+              </>
+            )}
           </span>
         </div>
       )}

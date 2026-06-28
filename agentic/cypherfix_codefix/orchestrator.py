@@ -4,10 +4,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 import httpx
 
+from . import sandbox_client
 from .state import CodeFixState, CodeFixSettings
 from .tools import CODEFIX_TOOLS
 from .tools.github_repo import GitHubRepoManager
@@ -100,6 +102,10 @@ class CodeFixOrchestrator:
             "agentNotes": "",
         })
 
+        # Per-job id for the build sandbox + worktree path (T6/E10). No dots, so
+        # it can never become a `..` path-traversal segment downstream.
+        self.state.job_id = re.sub(r'[^a-zA-Z0-9_-]', '_', remediation_id) or "codefix"
+
         # Clone repo
         await self.callback.on_phase("cloning_repo", "Cloning repository...")
         try:
@@ -107,6 +113,8 @@ class CodeFixOrchestrator:
                 token=self.state.settings.github_token,
                 repo=self.state.settings.github_repo or remediation.get("targetRepo", ""),
                 default_branch=self.state.settings.default_branch,
+                job_id=self.state.job_id,
+                branch_prefix=self.state.settings.branch_prefix,
             )
             logger.info(f"Cloning {self.repo_manager.repo} (branch: {self.state.settings.default_branch})...")
             repo_path = self.repo_manager.clone()
@@ -123,6 +131,16 @@ class CodeFixOrchestrator:
             logger.error(f"Clone failed: {e}")
             await self.callback.on_error(f"Clone failed: {e}", recoverable=False)
             return
+
+        # Spawn the isolated build sandbox now that the worktree exists. Build
+        # commands (github_bash) run THERE, not in the secret-holding agent
+        # container. Non-fatal: if it fails, file edits still work; only builds do not.
+        try:
+            await sandbox_client.spawn(self.state.job_id)
+            logger.info(f"Build sandbox ready for job {self.state.job_id}")
+        except Exception as e:
+            logger.warning(f"Build sandbox unavailable ({e}); github_bash will be disabled")
+            self.state.job_id = ""
 
         # Get repo structure
         await self.callback.on_phase("exploring_codebase", "Starting analysis...")
@@ -372,7 +390,10 @@ class CodeFixOrchestrator:
                 logger.info(f"Committing {len(self.state.diff_blocks)} change(s)...")
                 for i, block in enumerate(self.state.diff_blocks, 1):
                     logger.info(f"  Change {i}: {block.file_path} ({block.status})")
-                self.repo_manager.commit(title)
+                # Stage ONLY the files the LLM edited (approved), never `git add -A`,
+                # so anything a malicious build wrote into the worktree stays out of
+                # the PR (T6/E10).
+                self.repo_manager.commit(title, list(self.state.files_modified))
                 logger.info(f"Pushing branch {self.state.branch_name}...")
                 self.repo_manager.push(self.state.branch_name)
                 logger.info("Creating pull request...")
@@ -596,6 +617,10 @@ class CodeFixOrchestrator:
                 logger.info(f"Reset remediation {self.state.remediation_id} to pending (session interrupted)")
             except Exception as e:
                 logger.error(f"Failed to reset remediation status: {e}")
+
+        # Tear down the build sandbox (and its worktree on the orchestrator side).
+        if self.state.job_id:
+            await sandbox_client.teardown(self.state.job_id)
 
         if self.repo_manager:
             logger.info("Cleaning up cloned repository")

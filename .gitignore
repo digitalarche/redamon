@@ -205,8 +205,9 @@ readmes/AGENT.PROMPTS.md
 readmes/agent_prompts/
 
 
-# Internal docs
-internal/
+# Internal docs (top-level only — anchored so it does not also ignore nested
+# dirs named "internal", e.g. webapp/src/app/api/internal/)
+/internal/
 
 # RedAmon local config (created by redamon.sh)
 .gvm-enabled

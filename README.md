@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v5.1.1-release-2E8B57?style=flat" alt="Version 5.1.1"/>
+  <img height="24" src="https://img.shields.io/badge/v5.1.2-release-2E8B57?style=flat" alt="Version 5.1.2"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -625,7 +625,7 @@ Full interactive **PTY shell access** to the Kali sandbox container directly fro
 
 ### CypherFix: Automated Vulnerability Remediation
 
-Two-agent pipeline: a **Triage Agent** runs 9 hardcoded Cypher queries then uses an LLM to correlate, deduplicate, and prioritize findings. A **CodeFix Agent** clones the target repo, explores the codebase with 11 tools, implements fixes, and opens a GitHub PR, replicating Claude Code's agentic design.
+Two-agent pipeline: a **Triage Agent** runs 9 hardcoded Cypher queries then uses an LLM to correlate, deduplicate, and prioritize findings. A **CodeFix Agent** clones the target repo, explores the codebase with 11 tools, implements fixes, and opens a GitHub PR, replicating Claude Code's agentic design. Because the cloned repo is untrusted, its **build/test commands run in an isolated, secret-free sandbox container** (not in the agent), and the GitHub token never enters it.
 
 > **[Wiki: CypherFix](https://github.com/samugit83/redamon/wiki/CypherFix-Automated-Remediation)** | **[Technical: README.CYPHERFIX_AGENTS.md](readmes/README.CYPHERFIX_AGENTS.md)**
 

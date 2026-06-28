@@ -260,6 +260,18 @@ services:
     image: redamon-trufflehog:latest
     profiles: ["tools"]
 
+  # CodeFix build sandbox: runs the UNTRUSTED clone+build+test step of the
+  # CypherFix agent in isolation (threats T6/E10). Spawned ephemerally per job by
+  # recon_orchestrator/container_manager.py with no secrets, cap_drop=ALL,
+  # no-new-privileges, read-only rootfs, resource limits, on codefix-net (no
+  # RedAmon peer). Build-only here; never run as a long-lived compose service.
+  codefix-sandbox:
+    build:
+      context: .
+      dockerfile: codefix_sandbox/Dockerfile
+    image: redamon-codefix-sandbox:latest
+    profiles: ["tools"]
+
   # BadDNS (AGPL-3.0) runs isolated in its own container. RedAmon never
   # imports or links against it -- the recon container spawns this image
   # via Docker-in-Docker and receives NDJSON on stdout. See baddns_scan/
@@ -341,6 +353,10 @@ services:
       - ./ai_attack_surface_scan:/app/ai_attack_surface_scan:ro
       - ./mcp/nuclei-templates:/app/nuclei-templates:ro
       - /tmp/redamon:/tmp/redamon:rw
+      # Shared with the agent: the orchestrator resolves this volume's host path
+      # (via mount auto-detection) to bind per-job worktrees into the CodeFix build
+      # sandbox it spawns (T6/E10).
+      - cypherfix-work:/app/codefix-work
     environment:
       # Host paths are auto-detected from container mounts (no hardcoded paths needed)
       RECON_IMAGE: redamon-recon:latest
@@ -348,6 +364,9 @@ services:
       GITHUB_HUNT_IMAGE: redamon-github-hunter:latest
       TRUFFLEHOG_IMAGE: redamon-trufflehog:latest
       AI_ATTACK_SURFACE_IMAGE: redamon-ai-attack-surface:latest
+      # CodeFix build sandbox image + the docker network it attaches to (T6/E10).
+      CODEFIX_SANDBOX_IMAGE: redamon-codefix-sandbox:latest
+      CODEFIX_SANDBOX_NETWORK: redamon-codefix-net
       # Auth (forwarded to spawned containers)
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
       # Inbound API auth: the orchestrator validates this on every request (except
@@ -540,6 +559,9 @@ services:
       - ./agentic/skills:/app/skills:ro
       - ./agentic/community-skills:/app/community-skills:ro
       - cypherfix-repos:/tmp/cypherfix-repos
+      # CodeFix working trees: the agent clones here; the orchestrator bind-mounts
+      # each per-job worktree into an isolated build sandbox (T6/E10).
+      - cypherfix-work:/app/codefix-work
       - ./knowledge_base/kb_config.yaml:/app/knowledge_base/kb_config.yaml:ro
       - ./knowledge_base/data:/app/knowledge_base/data
       - tradecraft_cache:/app/tradecraft_cache
@@ -742,6 +764,16 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+  # CodeFix build sandboxes attach here at spawn. Deliberately a plain bridge with
+  # NAT egress (builds fetch npm/pip deps) but NO RedAmon service joins it, so a
+  # malicious build has internet but cannot reach webapp/neo4j/postgres/agent.
+  # Because no service is attached, Compose never creates it — the recon
+  # orchestrator creates it on demand (`_ensure_codefix_network`) with an
+  # auto-assigned subnet. This declaration documents intent and keeps
+  # `docker compose config` aware of it.
+  codefix-net:
+    name: redamon-codefix-net
+    driver: bridge
 
 # =============================================================================
 # Volumes
@@ -792,5 +824,10 @@ volumes:
   ospd_socket:
     name: redamon_ospd_socket
   cypherfix-repos:  # Temp storage for cloned GitHub repos (CodeFix agent)
+  # Shared between the agent (clones here) and the orchestrator (bind-mounts the
+  # per-job worktree into the build sandbox). NOT shared with scanners (unlike
+  # /tmp/redamon), so a low-trust scanner cannot tamper with a repo before its PR.
+  cypherfix-work:
+    name: redamon_cypherfix_work
   redamon_broker_socket:  # Holds the docker-broker filtered socket; in-VM so it is shareable on macOS + Linux
     name: redamon_broker_socket

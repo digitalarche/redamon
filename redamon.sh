@@ -17,7 +17,7 @@ CORE_SERVICES="postgres neo4j docker-broker recon-orchestrator kali-sandbox agen
 # services). All live under the compose `tools` profile and the redamon-* tag
 # namespace. ai-attack-surface is the AI Attack Surface scanner (garak/pyrit/
 # giskard/promptfoo).
-TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest redamon-ai-attack-surface:latest"
+TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest redamon-ai-attack-surface:latest redamon-codefix-sandbox:latest"
 DEV_COMPOSE="-f docker-compose.yml -f docker-compose.dev.yml"
 
 # Orchestrator-spawned containers that docker compose does NOT manage (they are
@@ -824,6 +824,11 @@ cmd_update() {
     # requirements file — needs a rebuild.
     if echo "$changed_files" | grep -qE "^ai_attack_surface_scan/(Dockerfile|.*requirements)"; then
         rebuild_tools+=(ai-attack-surface)
+    fi
+    # codefix-sandbox: the isolated CodeFix build sandbox (T6/E10). Build-only
+    # image; rebuild when anything in its build context changes.
+    if echo "$changed_files" | grep -q "^codefix_sandbox/"; then
+        rebuild_tools+=(codefix-sandbox)
     fi
 
     # Export version for build arg

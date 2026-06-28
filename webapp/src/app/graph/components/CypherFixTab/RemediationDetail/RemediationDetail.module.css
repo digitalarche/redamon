@@ -301,6 +301,25 @@
   margin-top: 2px;
 }
 
+.settingsLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  font-weight: 600;
+  color: var(--severity-medium, #ca8a04);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+
+.settingsLink:hover {
+  filter: brightness(1.2);
+}
+
+.settingsLink svg {
+  margin-top: 0;
+}
+
 .agentNotes {
   display: flex;
   align-items: flex-start;

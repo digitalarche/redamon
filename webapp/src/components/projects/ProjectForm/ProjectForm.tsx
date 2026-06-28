@@ -137,6 +137,8 @@ const TAB_GROUPS = [
 type TabId = typeof TAB_GROUPS[number]['tabs'][number]['id']
 
 const RECON_TAB_IDS = new Set<string>(['preset', 'target', 'discovery', 'port', 'http', 'resource', 'jsrecon', 'vuln', 'cve', 'security'])
+// All valid tab ids, for validating a `?tab=` deep-link.
+const ALL_TAB_IDS = new Set<string>(TAB_GROUPS.flatMap(g => g.tabs.map(t => t.id)))
 
 // Minimal fallback defaults - only required fields
 // Full defaults are fetched from /api/projects/defaults (served by recon backend)
@@ -249,6 +251,17 @@ export function ProjectForm({
   )
   const projectId =
     projectIdFromRoute ?? (initialData as { id?: string } | undefined)?.id ?? (mode === 'create' ? generatedId : undefined)
+
+  // Deep-link support: `?tab=<id>` (e.g. from the CodeFix "missing settings" alert
+  // linking to `/projects/[id]/settings?tab=cypherfix`) opens that tab directly.
+  // Read from window after mount to avoid a Suspense boundary requirement.
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab')
+    if (tab && ALL_TAB_IDS.has(tab)) {
+      setActiveTab(tab as TabId)
+      if (RECON_TAB_IDS.has(tab)) setViewMode('tabs')  // recon tabs only render in tabs view
+    }
+  }, [])
 
   // Track recon status in edit mode to reflect running state on the Start Recon button
   const { state: reconState } = useReconStatus({ projectId: mode === 'edit' ? (projectId ?? null) : null, enabled: mode === 'edit' })
