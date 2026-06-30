@@ -183,6 +183,20 @@ export interface VhostSniFindingRecord {
   lastSeen: string | null
 }
 
+export interface WebCachePoisonFindingRecord {
+  endpoint: string
+  cacheHeader: string | null
+  cacheParam: string | null
+  cacheImpact: string
+  cacheTechnique: string
+  severity: string
+  confidence: number | null
+  confidenceTier: string
+  sourceEngine: string | null
+  pocLink: string | null
+  description: string | null
+}
+
 export interface MalwareRecord {
   hash: string
   hashType: string | null
@@ -305,6 +319,16 @@ export interface ReportData {
     findings: VhostSniFindingRecord[]
   }
 
+  // Web Cache Poisoning
+  webCachePoison: {
+    totalFindings: number
+    confirmed: number
+    strong: number
+    bySeverity: { severity: string; count: number }[]
+    byImpact: { impact: string; count: number }[]
+    findings: WebCachePoisonFindingRecord[]
+  }
+
   // AI Surface Recon (Lap-2 Endpoint AI Classifier + central ai_surface_recon lap)
   aiSurface: {
     totalAiEndpoints: number
@@ -420,6 +444,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
     jsReconData,
     graphqlData,
     vhostSniData,
+    webCachePoisonData,
     aiSurfaceData,
     otxData,
   ] = await Promise.all([
@@ -433,6 +458,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
     withSession(s => queryJsRecon(s, projectId)),
     withSession(s => queryGraphql(s, projectId)),
     withSession(s => queryVhostSni(s, projectId)),
+    withSession(s => queryWebCachePoison(s, projectId)),
     withSession(s => queryAiSurface(s, projectId)),
     withSession(s => queryOtx(s, projectId)),
   ])
@@ -511,6 +537,12 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       const w = d.severity === 'high' ? 40 : d.severity === 'medium' ? 20 : d.severity === 'low' ? 8 : 2
       return sum + d.count * w
     }, 0)
+    // Web cache poisoning: confirmed findings that affect every cache visitor,
+    // so weighted high (stored XSS critical, open-redirect/deception high).
+    const webCachePoisonScore = webCachePoisonData.bySeverity.reduce((sum: number, d: { severity: string; count: number }) => {
+      const w = d.severity === 'critical' ? 60 : d.severity === 'high' ? 40 : d.severity === 'medium' ? 15 : 5
+      return sum + d.count * w
+    }, 0)
     const injectableScore = injectableParams * 25
     const expiredCertScore = graphOverview.certificateHealth.expired * 10
     // Missing security headers penalty
@@ -547,7 +579,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       + secretsScore + sensitiveFilesScore + injectableScore
       + expiredCertScore + missingHeaderScore
       + trufflehogScore + jsReconScore + graphqlScore + otxScore + vhostSniScore
-      + aiSurfaceScore
+      + webCachePoisonScore + aiSurfaceScore
     const riskScore = Math.min(100, Math.round(15 * Math.log(rawRisk + 1)))
     const riskLabel: 'Critical' | 'High' | 'Medium' | 'Low' | 'Minimal' =
       riskScore >= 80 ? 'Critical' : riskScore >= 60 ? 'High'
@@ -651,6 +683,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
       jsRecon: jsReconData,
       graphqlScan: graphqlData,
       vhostSni: vhostSniData,
+      webCachePoison: webCachePoisonData,
       aiSurface: aiSurfaceData,
       otx: otxData,
       attackChains: attackChainData,
@@ -1425,6 +1458,75 @@ async function queryVhostSni(session: any, pid: string) {
       description: (r.get('description') as string) || null,
       firstSeen: (r.get('firstSeen') as string) || null,
       lastSeen: (r.get('lastSeen') as string) || null,
+    })),
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function queryWebCachePoison(session: any, pid: string) {
+  const bySevRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'cache_poisoning'})
+     RETURN v.severity AS severity, count(v) AS count ORDER BY count DESC`,
+    { pid }
+  )
+  const byImpactRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'cache_poisoning'})
+     RETURN coalesce(v.cache_impact, 'unknown') AS impact, count(v) AS count ORDER BY count DESC`,
+    { pid }
+  )
+  const tierRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'cache_poisoning'})
+     RETURN coalesce(v.confidence_tier, 'Tentative') AS tier, count(v) AS count`,
+    { pid }
+  )
+  const findingsRes = await session.run(
+    `MATCH (v:Vulnerability {project_id: $pid, source: 'cache_poisoning'})
+     RETURN coalesce(v.endpoint, v.matched_at) AS endpoint,
+            v.cache_header AS cacheHeader,
+            v.cache_param AS cacheParam,
+            coalesce(v.cache_impact, 'unknown') AS cacheImpact,
+            coalesce(v.cache_technique, 'unknown') AS cacheTechnique,
+            v.severity AS severity,
+            v.confidence AS confidence,
+            coalesce(v.confidence_tier, 'Tentative') AS confidenceTier,
+            v.source_engine AS sourceEngine,
+            v.poc_link AS pocLink,
+            v.description AS description
+     ORDER BY CASE v.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+              v.confidence DESC
+     LIMIT 50`,
+    { pid }
+  )
+
+  const totalFindings = bySevRes.records.reduce((s: number, r: any) => s + toNum(r.get('count')), 0)
+  const tierCounts = new Map<string, number>(
+    tierRes.records.map((r: any) => [r.get('tier') as string, toNum(r.get('count'))] as [string, number])
+  )
+
+  return {
+    totalFindings,
+    confirmed: tierCounts.get('Confirmed') || 0,
+    strong: tierCounts.get('Strong') || 0,
+    bySeverity: bySevRes.records.map((r: any) => ({
+      severity: (r.get('severity') as string) || 'unknown',
+      count: toNum(r.get('count')),
+    })),
+    byImpact: byImpactRes.records.map((r: any) => ({
+      impact: (r.get('impact') as string) || 'unknown',
+      count: toNum(r.get('count')),
+    })),
+    findings: findingsRes.records.map((r: any) => ({
+      endpoint: (r.get('endpoint') as string) || '',
+      cacheHeader: (r.get('cacheHeader') as string) || null,
+      cacheParam: (r.get('cacheParam') as string) || null,
+      cacheImpact: (r.get('cacheImpact') as string) || 'unknown',
+      cacheTechnique: (r.get('cacheTechnique') as string) || 'unknown',
+      severity: (r.get('severity') as string) || 'medium',
+      confidence: r.get('confidence') != null ? toNum(r.get('confidence')) : null,
+      confidenceTier: (r.get('confidenceTier') as string) || 'Tentative',
+      sourceEngine: (r.get('sourceEngine') as string) || null,
+      pocLink: (r.get('pocLink') as string) || null,
+      description: (r.get('description') as string) || null,
     })),
   }
 }

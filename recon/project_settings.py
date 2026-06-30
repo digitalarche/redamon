@@ -701,6 +701,27 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     'GRAPHQL_COP_TEST_GET_MUTATION': True,
     'GRAPHQL_COP_TEST_POST_CSRF': True,
     'GRAPHQL_COP_TEST_UNHANDLED_ERROR': True,
+
+    # Web Cache Poisoning (WCVS breadth + native 5-phase confirmation)
+    'WEB_CACHE_POISON_ENABLED': False,                          # Master toggle (active, opt-in)
+    'WEB_CACHE_POISON_DOCKER_IMAGE': 'redamon-wcvs:latest',     # WCVS image (locally built)
+    'WEB_CACHE_POISON_SCAN_PROFILE': 'safe-confirm',           # safe-confirm | extended | research
+    'WEB_CACHE_POISON_TIMEOUT': 1800,                          # WCVS subprocess timeout (seconds)
+    'WEB_CACHE_POISON_TIMEOUT_PER_REQ': 10,                    # Native confirmation per-request timeout
+    'WEB_CACHE_POISON_CONCURRENCY': 10,                        # WCVS threads
+    'WEB_CACHE_POISON_CONFIRM_WORKERS': 6,                     # native confirmation parallel workers (URLs in flight)
+    'WEB_CACHE_POISON_MAX_RPS_PER_HOST': 0,                    # 0 = unlimited (WCVS -rr)
+    'WEB_CACHE_POISON_MIN_CONFIDENCE': 0.8,                    # Only >= this becomes a finding
+    'WEB_CACHE_POISON_ALLOW_FRAMEWORK_PACKS': True,           # Next.js/Nuxt/Remix hypothesis packs
+    'WEB_CACHE_POISON_ALLOW_DECEPTION': True,                 # Web-cache-deception (.css path tricks)
+    'WEB_CACHE_POISON_ALLOW_CPDOS': False,                    # Cache-poisoned DoS (research profile only)
+    'WEB_CACHE_POISON_CROSS_VANTAGE': False,                  # Second-vantage revalidation (infra-gated)
+    'WEB_CACHE_POISON_CACHE_HEADER': '',                      # Custom cache header (WCVS -ch)
+    'WEB_CACHE_POISON_CACHE_BUSTER_PARAM': 'rdmncb',          # Isolation cache-buster param name
+    'WEB_CACHE_POISON_VERIFY_SSL': True,
+    'WEB_CACHE_POISON_BEHAVIORAL_ORACLE': True,              # Detect silent caches (no cache headers) via frozen-Date probe
+    'WEB_CACHE_POISON_BEHAVIORAL_DELAY': 1.1,                # Seconds between the two frozen-Date probes
+    'WEB_CACHE_POISON_DIFFERENTIAL': True,                   # Non-reflective detection (status/location/body diff); adds one baseline probe/vector
 }
 
 
@@ -1482,6 +1503,27 @@ def fetch_project_settings(project_id: str, webapp_url: str) -> dict[str, Any]:
     settings['GRAPHQL_COP_TEST_POST_CSRF'] = project.get('graphqlCopTestPostCsrf', DEFAULT_SETTINGS['GRAPHQL_COP_TEST_POST_CSRF'])
     settings['GRAPHQL_COP_TEST_UNHANDLED_ERROR'] = project.get('graphqlCopTestUnhandledError', DEFAULT_SETTINGS['GRAPHQL_COP_TEST_UNHANDLED_ERROR'])
 
+    # Web Cache Poisoning
+    settings['WEB_CACHE_POISON_ENABLED'] = project.get('webCachePoisonEnabled', DEFAULT_SETTINGS['WEB_CACHE_POISON_ENABLED'])
+    settings['WEB_CACHE_POISON_DOCKER_IMAGE'] = project.get('webCachePoisonDockerImage', DEFAULT_SETTINGS['WEB_CACHE_POISON_DOCKER_IMAGE'])
+    settings['WEB_CACHE_POISON_SCAN_PROFILE'] = project.get('webCachePoisonScanProfile', DEFAULT_SETTINGS['WEB_CACHE_POISON_SCAN_PROFILE'])
+    settings['WEB_CACHE_POISON_TIMEOUT'] = project.get('webCachePoisonTimeout', DEFAULT_SETTINGS['WEB_CACHE_POISON_TIMEOUT'])
+    settings['WEB_CACHE_POISON_TIMEOUT_PER_REQ'] = project.get('webCachePoisonTimeoutPerReq', DEFAULT_SETTINGS['WEB_CACHE_POISON_TIMEOUT_PER_REQ'])
+    settings['WEB_CACHE_POISON_CONCURRENCY'] = project.get('webCachePoisonConcurrency', DEFAULT_SETTINGS['WEB_CACHE_POISON_CONCURRENCY'])
+    settings['WEB_CACHE_POISON_CONFIRM_WORKERS'] = project.get('webCachePoisonConfirmWorkers', DEFAULT_SETTINGS['WEB_CACHE_POISON_CONFIRM_WORKERS'])
+    settings['WEB_CACHE_POISON_MAX_RPS_PER_HOST'] = project.get('webCachePoisonMaxRpsPerHost', DEFAULT_SETTINGS['WEB_CACHE_POISON_MAX_RPS_PER_HOST'])
+    settings['WEB_CACHE_POISON_MIN_CONFIDENCE'] = project.get('webCachePoisonMinConfidence', DEFAULT_SETTINGS['WEB_CACHE_POISON_MIN_CONFIDENCE'])
+    settings['WEB_CACHE_POISON_ALLOW_FRAMEWORK_PACKS'] = project.get('webCachePoisonAllowFrameworkPacks', DEFAULT_SETTINGS['WEB_CACHE_POISON_ALLOW_FRAMEWORK_PACKS'])
+    settings['WEB_CACHE_POISON_ALLOW_DECEPTION'] = project.get('webCachePoisonAllowDeception', DEFAULT_SETTINGS['WEB_CACHE_POISON_ALLOW_DECEPTION'])
+    settings['WEB_CACHE_POISON_ALLOW_CPDOS'] = project.get('webCachePoisonAllowCpdos', DEFAULT_SETTINGS['WEB_CACHE_POISON_ALLOW_CPDOS'])
+    settings['WEB_CACHE_POISON_CROSS_VANTAGE'] = project.get('webCachePoisonCrossVantage', DEFAULT_SETTINGS['WEB_CACHE_POISON_CROSS_VANTAGE'])
+    settings['WEB_CACHE_POISON_CACHE_HEADER'] = project.get('webCachePoisonCacheHeader', DEFAULT_SETTINGS['WEB_CACHE_POISON_CACHE_HEADER'])
+    settings['WEB_CACHE_POISON_CACHE_BUSTER_PARAM'] = project.get('webCachePoisonCacheBusterParam', DEFAULT_SETTINGS['WEB_CACHE_POISON_CACHE_BUSTER_PARAM'])
+    settings['WEB_CACHE_POISON_VERIFY_SSL'] = project.get('webCachePoisonVerifySsl', DEFAULT_SETTINGS['WEB_CACHE_POISON_VERIFY_SSL'])
+    settings['WEB_CACHE_POISON_BEHAVIORAL_ORACLE'] = project.get('webCachePoisonBehavioralOracle', DEFAULT_SETTINGS['WEB_CACHE_POISON_BEHAVIORAL_ORACLE'])
+    settings['WEB_CACHE_POISON_BEHAVIORAL_DELAY'] = project.get('webCachePoisonBehavioralDelay', DEFAULT_SETTINGS['WEB_CACHE_POISON_BEHAVIORAL_DELAY'])
+    settings['WEB_CACHE_POISON_DIFFERENTIAL'] = project.get('webCachePoisonDifferential', DEFAULT_SETTINGS['WEB_CACHE_POISON_DIFFERENTIAL'])
+
     # RoE: cap all rate limits to the global max if set
     roe_max_rps = settings['ROE_GLOBAL_MAX_RPS']
     if settings.get('ROE_ENABLED', False) and roe_max_rps > 0:
@@ -1661,6 +1703,12 @@ def apply_stealth_overrides(settings: dict[str, Any]) -> dict[str, Any]:
     # build a custom preset (see red-team-operator) with graph-only candidates,
     # L7-only, low concurrency. ---
     settings['VHOST_SNI_ENABLED'] = False
+
+    # --- Web Cache Poisoning: disable entirely. Active poisoning probes (header
+    # mutation + repeated baseline/poison/clean fetches) are loud and send many
+    # requests per URL — incompatible with stealth/Tor. CPDoS stays force-off. ---
+    settings['WEB_CACHE_POISON_ENABLED'] = False
+    settings['WEB_CACHE_POISON_ALLOW_CPDOS'] = False
 
     # --- Hakrawler: DISABLED (active crawler, no rate-limit control) ---
     settings['HAKRAWLER_ENABLED'] = False

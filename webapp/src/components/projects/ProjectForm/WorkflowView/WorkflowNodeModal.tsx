@@ -31,6 +31,7 @@ import { NucleiSection } from '../sections/NucleiSection'
 import { GraphqlScanSection } from '../sections/GraphqlScanSection'
 import { TakeoverSection } from '../sections/TakeoverSection'
 import { VhostSniSection } from '../sections/VhostSniSection'
+import { WebCachePoisonSection } from '../sections/WebCachePoisonSection'
 import { CveLookupSection } from '../sections/CveLookupSection'
 import { MitreSection } from '../sections/MitreSection'
 import { SecurityChecksSection } from '../sections/SecurityChecksSection'
@@ -107,6 +108,7 @@ export function WorkflowNodeModal({
       case 'GraphqlScan':       return <GraphqlScanSection {...extendedProps} />
       case 'SubdomainTakeover': return <TakeoverSection {...baseProps} />
       case 'VhostSni':          return <VhostSniSection {...baseProps} />
+      case 'WebCachePoison':    return <WebCachePoisonSection {...baseProps} />
       case 'CveLookup':         return <CveLookupSection {...baseProps} />
       case 'Mitre':             return <MitreSection {...baseProps} />
       case 'SecurityChecks':    return <SecurityChecksSection {...baseProps} />

@@ -242,6 +242,7 @@ Pentesters with full authorization on an engagement where stealth is irrelevant.
 
     // --- GraphQL Security: full active coverage ---
     graphqlSecurityEnabled: true,
+    webCachePoisonEnabled: true,
     graphqlCopEnabled: true,
 
     // --- CVE Lookup: enabled ---

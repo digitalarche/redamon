@@ -612,7 +612,7 @@ Discovered vulnerabilities. Seven sources produce Vulnerability nodes, each with
     id: String,                              // Unique identifier
     user_id: String,                         // Multi-tenant isolation
     project_id: String,                      // Multi-tenant isolation
-    source: "nuclei" | "gvm" | "security_check" | "netlas" | "nmap_nse" | "graphql_scan" | "takeover_scan" | "vhost_sni_enum",  // Scanner source
+    source: "nuclei" | "gvm" | "security_check" | "netlas" | "nmap_nse" | "graphql_scan" | "takeover_scan" | "vhost_sni_enum" | "cache_poisoning",  // Scanner source
     name: String,                            // Vulnerability name
     description: String,                     // Description
     severity: "critical" | "high" | "medium" | "low" | "info",  // Always lowercase
@@ -869,6 +869,35 @@ Layered scanner: **Subjack** (DNS-first, Apache-2.0 Go binary baked into the rec
 ```
 
 VHost/SNI also creates a **BaseURL** node for each newly discovered hidden vhost (so Katana / Nuclei can scan it via partial recon follow-up). Relationships used: `(:Subdomain)-[:HAS_VULNERABILITY]->(:Vulnerability)`, `(:IP)-[:HAS_VULNERABILITY]->(:Vulnerability)` (for `host_header_bypass` only), `(:Subdomain)-[:HAS_BASEURL]->(:BaseURL)`. No new node labels, no new relationship types.
+
+**Web cache poisoning properties (source = "cache_poisoning"):**
+```cypher
+(:Vulnerability {
+    id: "cache_{user_id}_{project_id}_{technique}_{baseurl}_{path}_{vector}",  // Deterministic, MERGE-safe
+    source: "cache_poisoning",
+    vulnerability_type: "web_cache_poisoning",
+    name: "Web Cache Poisoning via X-Forwarded-Host",
+    severity: "critical" | "high" | "medium",
+    cvss_score: 9.3,
+
+    // Cache-poisoning specific
+    cache_header: "X-Forwarded-Host",          // unkeyed header vector (or "" if param)
+    cache_param: "",                            // unkeyed query-param vector (or "" if header)
+    cache_vector_type: "header",                // "header" | "param" | "path" (path = deception)
+    cache_impact: "stored_xss" | "open_redirect" | "deception" | "dos" | "reflected",
+    cache_technique: "unkeyed_header" | "unkeyed_param" | "cache_deception" | "framework_next" | "framework_remix" | ...,
+    confidence: 0.97,                           // 0–1
+    confidence_tier: "Confirmed" | "Strong" | "Tentative",
+    cache_signals: ["x-cache: hit", "age: 30"], // cache fingerprint evidence
+    cache_buster: "rdmncb=cb9f1a2b",            // isolated buster used (never poisoned the real entry)
+    source_engine: "wcvs" | "hypothesis",       // WCVS breadth vs native pack
+    poc_link: "https://target/home?rdmncb=...", // reproduction URL
+    curl_verify: "curl -sk -H 'X-Forwarded-Host: ...' '...'",
+    evidence: "{...}",                          // JSON: baseline/poisoned/clean hashes, canary
+    matched_at: "https://target/home",
+})
+```
+The cache module reuses the **Vulnerability** node (no new label) and wires `(:Endpoint)-[:HAS_VULNERABILITY]->(:Vulnerability)` plus `(:BaseURL)-[:HAS_VULNERABILITY]->(:Vulnerability)` (host-level), creating the BaseURL/Endpoint via MERGE if upstream crawling missed them. Only findings at or above `WEB_CACHE_POISON_MIN_CONFIDENCE` are persisted.
 
 **Constraints:**
 ```cypher

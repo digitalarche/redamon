@@ -165,7 +165,6 @@ Pentesters running a final comprehensive sweep on a target they have full author
 
     // --- Hakrawler: maximum crawl ---
     hakrawlerEnabled: true,
-    zapAjaxSpiderEnabled: false,
     hakrawlerDepth: 5,
     hakrawlerThreads: 15,
     hakrawlerTimeout: 90,
@@ -173,6 +172,21 @@ Pentesters running a final comprehensive sweep on a target they have full author
     hakrawlerIncludeSubs: true,
     hakrawlerInsecure: true,
     hakrawlerParallelism: 8,
+
+    // --- ZAP Ajax Spider: ON for maximum browser-based crawling. Seeds from base
+    //     URLs + endpoints, deep crawl, multiple parallel browsers. ---
+    zapAjaxSpiderEnabled: true,
+    zapAjaxSpiderSeedMode: 'base_urls_and_endpoints',
+    zapAjaxSpiderMaxDuration: 30,
+    zapAjaxSpiderMaxCrawlDepth: 10,
+    zapAjaxSpiderMaxCrawlStates: 0,
+    zapAjaxSpiderNumberOfBrowsers: 4,
+    zapAjaxSpiderClickDefaultElems: true,
+    zapAjaxSpiderClickElemsOnce: true,
+    zapAjaxSpiderLogoutAvoidance: true,
+    zapAjaxSpiderScopeCheck: 'Strict',
+    zapAjaxSpiderMaxUrls: 2000,
+    zapAjaxSpiderParallelism: 4,
 
     // --- GAU: all providers, high limits, with verification ---
     gauEnabled: true,
@@ -283,8 +297,16 @@ Pentesters running a final comprehensive sweep on a target they have full author
 
     // --- GraphQL Security: max coverage ---
     graphqlSecurityEnabled: true,
+    webCachePoisonEnabled: true,
     graphqlCopEnabled: true,
     graphqlCopTestIntrospection: true,  // Both scanners for cross-validation
+
+    // --- Subdomain Takeover: ON for maximum. Both engines (subjack + Nuclei
+    //     takeover templates) plus AI classification of dangling-CNAME candidates. ---
+    subdomainTakeoverEnabled: true,
+    subjackEnabled: true,
+    nucleiTakeoversEnabled: true,
+    takeoverAiClassifier: true,
 
     // --- CVE Lookup: max ---
     cveLookupEnabled: true,

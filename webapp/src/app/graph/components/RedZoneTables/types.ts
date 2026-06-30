@@ -34,6 +34,7 @@ export type RedZoneTableSlug =
   | 'threatIntel'
   | 'supplyChain'
   | 'dnsDrift'
+  | 'webCachePoison'
 
 export interface RedZoneTableResponse<T> {
   rows: T[]

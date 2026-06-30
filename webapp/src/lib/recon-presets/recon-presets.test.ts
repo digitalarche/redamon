@@ -846,6 +846,7 @@ describe('Full Pipeline - Maximum preset', () => {
       p.wappalyzerEnabled,
       p.katanaEnabled,
       p.hakrawlerEnabled,
+      p.zapAjaxSpiderEnabled,
       p.gauEnabled,
       p.paramspiderEnabled,
       p.jsluiceEnabled,
@@ -854,6 +855,7 @@ describe('Full Pipeline - Maximum preset', () => {
       p.kiterunnerEnabled,
       p.arjunEnabled,
       p.nucleiEnabled,
+      p.subdomainTakeoverEnabled,
       p.securityCheckEnabled,
       p.cveLookupEnabled,
       p.mitreEnabled,
@@ -3406,8 +3408,8 @@ describe('Preset merge logic', () => {
 // ============================================================
 
 describe('Preset system integrity', () => {
-  test('registry contains exactly 23 presets', () => {
-    expect(RECON_PRESETS).toHaveLength(23)
+  test('registry contains exactly 24 presets', () => {
+    expect(RECON_PRESETS).toHaveLength(24)
   })
 
   test('every preset has all required fields with correct types', () => {
@@ -3607,16 +3609,18 @@ describe('ZAP Ajax Spider preset coverage', () => {
   // so it is deliberately OFF in quick, passive, stealth, OSINT, and JS-extraction presets.
   const EXPECTED_ENABLED = [
     'api-security', 'bug-bounty-deep', 'full-active-scan', 'web-app-pentester',
+    // Full Pipeline - Maximum runs every tool, including browser-driven crawling.
+    'full-maximum-scan',
   ]
 
-  // Every non-enabling preset must explicitly set zapAjaxSpiderEnabled: false (not omit it),
-  // because preset application is a shallow merge. Without explicit false, switching from a
-  // ZAP-enabled preset to one that merely omits the key leaves the toggle stuck ON.
+  // Non-enabling presets still set zapAjaxSpiderEnabled: false explicitly. This used to
+  // be required because preset application was a shallow merge (a stuck-ON toggle would
+  // carry over); applyPreset now resets to backend defaults first, so explicit-false is
+  // belt-and-suspenders rather than strictly necessary.
   const EXPLICITLY_DISABLED = [
     'bug-bounty-quick', 'red-team-operator', 'stealth-recon',
     'compliance-audit', 'cve-hunter',
     'cloud-exposure', 'dns-email-security', 'full-passive-scan',
-    'full-maximum-scan',
     'infrastructure-mapper', 'large-network', 'osint-investigator',
     'subdomain-takeover', 'secret-hunter', 'secret-miner',
     'directory-discovery', 'parameter-injection', 'graphql-recon',
@@ -3850,7 +3854,50 @@ describe('GraphQL Recon preset', () => {
     expect(uniqueIds.size).toBe(ids.length)
   })
 
-  test('is included in the registry (current count: 23)', () => {
-    expect(RECON_PRESETS.length).toBe(23)
+  test('is included in the registry (current count: 24)', () => {
+    expect(RECON_PRESETS.length).toBe(24)
+  })
+})
+
+describe('Web Cache Poisoning preset', () => {
+  const preset = getPresetById('web-cache-poisoning')!
+
+  test('exists and is WCP-focused', () => {
+    expect(preset).toBeDefined()
+    expect(preset.parameters.webCachePoisonEnabled).toBe(true)
+    expect(preset.parameters.scanModules).toContain('vuln_scan')
+  })
+
+  test('enables the prerequisites WCP depends on (live URLs + fingerprint)', () => {
+    expect(preset.parameters.httpxEnabled).toBe(true)
+    expect(preset.parameters.katanaEnabled).toBe(true)
+    expect(preset.parameters.wappalyzerEnabled).toBe(true)   // framework-pack gating
+    expect(preset.parameters.webCachePoisonAllowFrameworkPacks).toBe(true)
+    expect(preset.parameters.webCachePoisonBehavioralOracle).toBe(true)
+  })
+
+  test('stays safe: safe-confirm profile, CPDoS off', () => {
+    expect(preset.parameters.webCachePoisonScanProfile).toBe('safe-confirm')
+    expect(preset.parameters.webCachePoisonAllowCpdos).toBe(false)
+  })
+
+  test('stays focused: unrelated heavy scanners off', () => {
+    expect(preset.parameters.nucleiEnabled).toBe(false)
+    expect(preset.parameters.graphqlSecurityEnabled).toBe(false)
+    expect(preset.parameters.osintEnrichmentEnabled).toBe(false)
+    // Host-enumeration / active param-fuzzing aren't part of a cache-poisoning hunt.
+    expect(preset.parameters.vhostSniEnabled).toBe(false)
+    expect(preset.parameters.arjunEnabled).toBe(false)
+    expect(preset.parameters.paramspiderEnabled).toBe(false)
+  })
+
+  test('explicitly disables AI modules that default ON (no leak)', () => {
+    // These all default true globally, so a focused preset must turn them off
+    // explicitly or they show up active in the workflow graph.
+    expect(preset.parameters.aiSurfaceReconEnabled).toBe(false)
+    expect(preset.parameters.resourceEnumAiClassifierEnabled).toBe(false)
+    expect(preset.parameters.resourceEnumAiPathClassifierEnabled).toBe(false)
+    expect(preset.parameters.httpProbeAiWappalyzerEnabled).toBe(false)
+    expect(preset.parameters.jsReconEnabled).toBe(false)
   })
 })

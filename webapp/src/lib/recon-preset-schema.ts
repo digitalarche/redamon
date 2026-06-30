@@ -415,6 +415,26 @@ export const reconPresetSchema = z.object({
   vhostSniMaxCandidatesPerIp: int,
   vhostSniCustomWordlist: str,
 
+  webCachePoisonEnabled: bool,
+  webCachePoisonDockerImage: str,
+  webCachePoisonScanProfile: str,
+  webCachePoisonTimeout: int,
+  webCachePoisonTimeoutPerReq: int,
+  webCachePoisonConcurrency: int,
+  webCachePoisonConfirmWorkers: int,
+  webCachePoisonMaxRpsPerHost: float,
+  webCachePoisonMinConfidence: float,
+  webCachePoisonAllowFrameworkPacks: bool,
+  webCachePoisonAllowDeception: bool,
+  webCachePoisonAllowCpdos: bool,
+  webCachePoisonCrossVantage: bool,
+  webCachePoisonCacheHeader: str,
+  webCachePoisonCacheBusterParam: str,
+  webCachePoisonVerifySsl: bool,
+  webCachePoisonBehavioralOracle: bool,
+  webCachePoisonBehavioralDelay: float,
+  webCachePoisonDifferential: bool,
+
   // -- CVE Lookup --
   cveLookupEnabled: bool,
   cveLookupSource: str,
@@ -898,6 +918,27 @@ export const RECON_PARAMETER_CATALOG = `
 - vhostSniUseGraphCandidates: boolean - Pull hostnames from existing Subdomain, ExternalDomain, TLS SAN list, CNAME targets and reverse-DNS PTR records resolving to each target IP. Highest signal source. Default true.
 - vhostSniMaxCandidatesPerIp: integer - Hard cap on candidates per IP to bound run time. Default 2000.
 - vhostSniCustomWordlist: string - Optional newline-separated custom prefixes/hostnames (per-project file/text). Bare prefixes expand as {prefix}.{target_apex}; full hostnames are used as-is. Default "".
+
+## Web Cache Poisoning (WCVS breadth engine + native 5-phase confirmation)
+- webCachePoisonEnabled: boolean - Master switch. Active scan: detects web cache poisoning + web cache deception on live BaseURLs/Endpoints. Sends header/param mutation probes plus repeated baseline/poison/clean fetches per URL. Default false.
+- webCachePoisonDockerImage: string - Docker image for the WCVS breadth engine (Hackmanit Web Cache Vulnerability Scanner), built locally. Default "redamon-wcvs:latest".
+- webCachePoisonScanProfile: string - "safe-confirm" (production, benign canaries, always isolated), "extended" (owned test targets), or "research" (lab only, enables CPDoS if allowed). Default "safe-confirm".
+- webCachePoisonTimeout: integer - WCVS subprocess timeout in seconds. Default 1800.
+- webCachePoisonTimeoutPerReq: integer - Native confirmation per-request timeout in seconds. Default 10.
+- webCachePoisonConcurrency: integer - WCVS threads for the breadth sweep. Higher = faster, louder. Default 10.
+- webCachePoisonConfirmWorkers: integer - Native confirmation parallel workers (how many URLs are tested concurrently; bounds in-flight requests). 1 = fully sequential/stealthiest, up to 16. Default 6.
+- webCachePoisonMaxRpsPerHost: number - Requests/sec cap per host (0 = unlimited). Default 0.
+- webCachePoisonMinConfidence: number - Only findings scoring at or above this (0-1) become Vulnerability nodes. 0.8 keeps Confirmed + Strong. Default 0.8.
+- webCachePoisonAllowFrameworkPacks: boolean - Fire Next.js/Nuxt/Remix-specific vectors only when the tech fingerprint matches. Default true.
+- webCachePoisonAllowDeception: boolean - Web cache deception (path-confusion .css tricks). Default true.
+- webCachePoisonAllowCpdos: boolean - Cache-poisoned DoS tests (oversized/meta-char). Only honored in research profile. Default false.
+- webCachePoisonCrossVantage: boolean - Re-confirm from a second network vantage (requires extra egress infra). Default false.
+- webCachePoisonCacheHeader: string - Override the cache hit/miss header if the target uses a non-standard one. Default "".
+- webCachePoisonCacheBusterParam: string - Query param name used to isolate every test into its own cache slot. Default "rdmncb".
+- webCachePoisonVerifySsl: boolean - Verify TLS certificates during native confirmation. Default true.
+- webCachePoisonBehavioralOracle: boolean - Detect *silent* caches (no cache-status headers, common with default Varnish/nginx or hardened CDNs) via a frozen-Date probe: fetch twice across a short delay; a frozen Date header + identical body implies a cache. Catches caches header detection alone would miss. Default true.
+- webCachePoisonBehavioralDelay: number - Seconds to wait between the two frozen-Date probes. Larger = more reliable on slow origins, but adds latency per silent URL. Default 1.1.
+- webCachePoisonDifferential: boolean - Non-reflective detection. Beyond looking for a benign canary echoed back, also flag a poison that changes the response *behaviour* (a persisted status code / Location redirect / body) with no echoed marker, guarded against false positives by requiring the affected response dimension to be stable across two clean baselines. Catches CPDoS-style status flips, scheme/redirect poisoning, and cache-key confusion. Adds one extra baseline request per vector. Default true.
 
 ## CVE Lookup
 - cveLookupEnabled: boolean

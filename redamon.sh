@@ -13,11 +13,12 @@ LEGACY_SKIPKBASE_FLAG_FILE="$SCRIPT_DIR/.skipkbase"
 
 # Service lists
 CORE_SERVICES="postgres neo4j docker-broker recon-orchestrator kali-sandbox agent webapp"
-# Build-only images spawned on demand by the recon-orchestrator (NOT long-running
-# services). All live under the compose `tools` profile and the redamon-* tag
-# namespace. ai-attack-surface is the AI Attack Surface scanner (garak/pyrit/
-# giskard/promptfoo).
-TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest redamon-ai-attack-surface:latest redamon-codefix-sandbox:latest"
+# Build-only images run on demand (NOT long-running services). All live under the
+# compose `tools` profile and the redamon-* tag namespace. ai-attack-surface is the
+# AI Attack Surface scanner (garak/pyrit/giskard/promptfoo). wcvs is the Web Cache
+# Vulnerability Scanner, run docker-in-docker by the recon container for the web
+# cache poisoning module.
+TOOL_IMAGES="redamon-recon:latest redamon-vuln-scanner:latest redamon-github-hunter:latest redamon-trufflehog:latest redamon-baddns:latest redamon-ai-attack-surface:latest redamon-codefix-sandbox:latest redamon-wcvs:latest"
 DEV_COMPOSE="-f docker-compose.yml -f docker-compose.dev.yml"
 
 # Orchestrator-spawned containers that docker compose does NOT manage (they are
@@ -806,6 +807,12 @@ cmd_update() {
     # toolchain on arm64) on an unrelated compose change.
     if echo "$changed_files" | grep -q "^recon/"; then
         rebuild_tools+=(recon)
+    fi
+    # wcvs: the Web Cache Vulnerability Scanner image (web cache poisoning module),
+    # run docker-in-docker by the recon container. Build-only; rebuild when its
+    # Dockerfile (or pinned WCVS_REF) changes.
+    if echo "$changed_files" | grep -q "^wcvs/"; then
+        rebuild_tools+=(wcvs)
     fi
     if echo "$changed_files" | grep -q "^gvm_scan/"; then
         rebuild_tools+=(vuln-scanner)

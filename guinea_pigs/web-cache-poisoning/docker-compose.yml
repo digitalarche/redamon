@@ -1,0 +1,45 @@
+# Self-contained vulnerable target for end-to-end validation of the RedAmon WCP
+# module. Brings up a real nginx shared cache in front of a deliberately
+# vulnerable Flask origin.
+#
+#   docker compose up -d --build
+#   open http://localhost:9090/        (landing page links every test endpoint)
+#
+# The cache is reachable on the host at http://localhost:9090. Point a RedAmon
+# recon project at the host's Docker-bridge IP on port 9090 (see README) so the
+# scan containers can reach it.
+
+services:
+  backend:
+    build: ./backend
+    container_name: wcp-guinea-backend
+    expose:
+      - "5000"
+    # Direct origin port (bypasses the nginx cache, which rewrites Date). Used ONLY
+    # for the silent / frozen-Date behavioural-oracle test; everything else goes
+    # through the realistic nginx cache on :9090.
+    ports:
+      - "9091:5000"
+    volumes:
+      - ./tests:/app/tests:ro   # in-container unit tests (Flask test_client)
+    networks:
+      - wcp
+
+  cache:
+    image: nginx:1.27-alpine
+    container_name: wcp-guinea-cache
+    depends_on:
+      - backend
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      # Port 80 so a plain-IP recon target is found by default httpx probing (80/443);
+      # 9090 kept as an explicit alias for manual cur/testing.
+      - "80:80"
+      - "9090:80"
+    networks:
+      - wcp
+
+networks:
+  wcp:
+    name: wcp-guinea-net

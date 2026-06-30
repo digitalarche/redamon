@@ -158,11 +158,15 @@ IMAGES=(
     "projectdiscovery/uncover:latest"
     "dolevf/graphql-cop:1.14"
     "ghcr.io/zaproxy/zaproxy:stable"
+    "redamon-wcvs:latest"
 )
 
 for IMAGE in "${IMAGES[@]}"; do
     if docker images -q "$IMAGE" 2>/dev/null | grep -q .; then
         echo -e "${GREEN}[+] $IMAGE already pulled${NC}"
+    elif [[ "$IMAGE" == redamon-* ]]; then
+        # Locally-built image (e.g. WCVS) — never pull from a registry.
+        echo -e "${YELLOW}[!] $IMAGE not found locally — build with: docker compose --profile tools build wcvs${NC}"
     else
         echo -e "${YELLOW}[*] Pulling $IMAGE...${NC}"
         if [[ "$IMAGE" == "sxcurity/gau:latest" ]] && [[ "$(uname -m)" =~ ^(arm64|aarch64)$ ]]; then

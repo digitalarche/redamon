@@ -22,6 +22,7 @@ import { PARAMETER_INJECTION } from './presets/parameter-injection'
 import { DNS_EMAIL_SECURITY } from './presets/dns-email-security'
 import { LARGE_NETWORK } from './presets/large-network'
 import { AI_SURFACE_RECON } from './presets/ai-surface-recon'
+import { WEB_CACHE_POISONING } from './presets/web-cache-poisoning'
 
 export type { ReconPreset } from './types'
 
@@ -49,6 +50,7 @@ export const RECON_PRESETS: ReconPreset[] = [
   DNS_EMAIL_SECURITY,
   LARGE_NETWORK,
   AI_SURFACE_RECON,
+  WEB_CACHE_POISONING,
 ]
 
 export function getPresetById(id: string): ReconPreset | undefined {

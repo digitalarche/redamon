@@ -32,6 +32,7 @@ import {
   DnsDriftTable,
   AiSurfaceTable,
   AiRiskTable,
+  WebCachePoisonTable,
 } from './components/RedZoneTables'
 import { ActiveSessions } from './components/ActiveSessions'
 import { RoeViewer } from './components/RoeViewer'
@@ -1394,6 +1395,8 @@ export default function GraphPage() {
               <SupplyChainTable projectId={projectId} />
             ) : tableViewMode === 'dnsDrift' ? (
               <DnsDriftTable projectId={projectId} />
+            ) : tableViewMode === 'webCachePoison' ? (
+              <WebCachePoisonTable projectId={projectId} />
             ) : (
               <DataTable
                 data={filterGraphData ?? data}

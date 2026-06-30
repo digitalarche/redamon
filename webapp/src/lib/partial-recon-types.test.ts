@@ -91,6 +91,10 @@ describe('PARTIAL_RECON_SUPPORTED_TOOLS', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('VhostSni')).toBe(true)
   })
 
+  test('contains WebCachePoison', () => {
+    expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('WebCachePoison')).toBe(true)
+  })
+
   test('contains EndpointAiClassifier', () => {
     expect(PARTIAL_RECON_SUPPORTED_TOOLS.has('EndpointAiClassifier')).toBe(true)
   })
@@ -199,6 +203,11 @@ describe('PARTIAL_RECON_PHASE_MAP', () => {
   test('has VhostSni phases', () => {
     expect(PARTIAL_RECON_PHASE_MAP['VhostSni']).toHaveLength(1)
     expect(PARTIAL_RECON_PHASE_MAP['VhostSni'][0]).toBe('VHost & SNI Enumeration')
+  })
+
+  test('has WebCachePoison phases', () => {
+    expect(PARTIAL_RECON_PHASE_MAP['WebCachePoison']).toHaveLength(1)
+    expect(PARTIAL_RECON_PHASE_MAP['WebCachePoison'][0]).toBe('Cache Poisoning Detection')
   })
 
   test('has GraphqlScan phases (Phase 1 §9.5)', () => {

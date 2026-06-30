@@ -411,6 +411,28 @@ model Project {
   vhostSniCustomWordlist           String   @default("") @map("vhost_sni_custom_wordlist") @db.Text
   vhostSniMaxCandidatesPerIp       Int      @default(2000) @map("vhost_sni_max_candidates_per_ip")
 
+  // ========== WEB CACHE POISONING ==========
+  // Active GROUP 6 scanner: WCVS breadth engine + native 5-phase confirmation.
+  webCachePoisonEnabled            Boolean  @default(false) @map("web_cache_poison_enabled")
+  webCachePoisonDockerImage        String   @default("redamon-wcvs:latest") @map("web_cache_poison_docker_image")
+  webCachePoisonScanProfile        String   @default("safe-confirm") @map("web_cache_poison_scan_profile")
+  webCachePoisonTimeout            Int      @default(1800) @map("web_cache_poison_timeout")
+  webCachePoisonTimeoutPerReq      Int      @default(10) @map("web_cache_poison_timeout_per_req")
+  webCachePoisonConcurrency        Int      @default(10) @map("web_cache_poison_concurrency")
+  webCachePoisonConfirmWorkers     Int      @default(6) @map("web_cache_poison_confirm_workers")
+  webCachePoisonMaxRpsPerHost      Float    @default(0) @map("web_cache_poison_max_rps_per_host")
+  webCachePoisonMinConfidence      Float    @default(0.8) @map("web_cache_poison_min_confidence")
+  webCachePoisonAllowFrameworkPacks Boolean @default(true) @map("web_cache_poison_allow_framework_packs")
+  webCachePoisonAllowDeception     Boolean  @default(true) @map("web_cache_poison_allow_deception")
+  webCachePoisonAllowCpdos         Boolean  @default(false) @map("web_cache_poison_allow_cpdos")
+  webCachePoisonCrossVantage       Boolean  @default(false) @map("web_cache_poison_cross_vantage")
+  webCachePoisonCacheHeader        String   @default("") @map("web_cache_poison_cache_header")
+  webCachePoisonCacheBusterParam   String   @default("rdmncb") @map("web_cache_poison_cache_buster_param")
+  webCachePoisonVerifySsl          Boolean  @default(true) @map("web_cache_poison_verify_ssl")
+  webCachePoisonBehavioralOracle   Boolean  @default(true) @map("web_cache_poison_behavioral_oracle")
+  webCachePoisonBehavioralDelay    Float    @default(1.1) @map("web_cache_poison_behavioral_delay")
+  webCachePoisonDifferential       Boolean  @default(true) @map("web_cache_poison_differential")
+
   // ========== RESOURCE ENUM AI CLASSIFIER ==========
   // Cross-cutting AI classifier — runs after Katana/Hakrawler/GAU/FFuf/jsluice/
   // ParamSpider/Kiterunner/Arjun have produced endpoints. Tags every Endpoint

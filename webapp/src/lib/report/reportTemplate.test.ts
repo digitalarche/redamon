@@ -129,6 +129,14 @@ function makeReportData(overrides: Partial<ReportData> = {}): ReportData {
       byType: [],
       findings: [],
     },
+    webCachePoison: {
+      totalFindings: 0,
+      confirmed: 0,
+      strong: 0,
+      bySeverity: [],
+      byImpact: [],
+      findings: [],
+    },
     attackChains: {
       chains: [],
       exploitSuccesses: [],

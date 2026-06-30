@@ -61,6 +61,12 @@ const TOOL_API_KEYS: Record<string, ApiKeyReq[]> = {
 }
 
 const TOOL_DESCRIPTIONS: Record<string, string> = {
+  WebCachePoison:
+    'Detects web cache poisoning and web cache deception on live URLs. Runs the WCVS breadth engine, ' +
+    'then a native confirmation (cache oracle, isolated cache-buster, framework hypotheses, ' +
+    'baseline-poison-clean persistence check, confidence scoring). ' +
+    'Targets are loaded from the graph (BaseURLs + Endpoints). You can also provide custom URLs below. ' +
+    'Confirmed findings are merged as Vulnerability nodes (source=cache_poisoning) -- duplicates are updated, not recreated.',
   SubdomainDiscovery:
     'Discovers subdomains using 5 tools in parallel (crt.sh, HackerTarget, Subfinder, Amass, Knockpy), ' +
     'filters wildcards with Puredns, then resolves full DNS records (A, AAAA, MX, NS, TXT, SOA, CNAME) for each. ' +
@@ -431,13 +437,15 @@ export function PartialReconModal({
   const isOsintEnrichment = toolId === 'OsintEnrichment'
   const isSubdomainTakeover = toolId === 'SubdomainTakeover'
   const isVhostSni = toolId === 'VhostSni'
-  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider || isSecurityChecks || isShodan || isOsintEnrichment || isGraphql || isSubdomainTakeover || isVhostSni
+  const isWebCachePoison = toolId === 'WebCachePoison'
+  const hasUserInputs = isPortScanner || isNmap || isHttpx || isResourceEnum || isArjun || isGau || isParamSpider || isSecurityChecks || isShodan || isOsintEnrichment || isGraphql || isSubdomainTakeover || isVhostSni || isWebCachePoison
   const hasIpInput = isPortScanner || isNmap || isHttpx || isSecurityChecks || isShodan || isOsintEnrichment || isVhostSni
   const hasSubdomainInput = toolId === 'Naabu' || isHttpx || isGau || isParamSpider || isSecurityChecks || isSubdomainTakeover || isVhostSni
   const hasPortInput = isNmap || isHttpx
-  // GraphqlScan's SECTION_INPUT_MAP = [BaseURL, Endpoint]. Per PROMPT.ADD_PARTIAL_RECON.md,
-  // BaseURL-accepting tools get a URL textarea; Endpoint is graph-only (never manually entered).
-  const hasUrlInput = isResourceEnum || isArjun || isSecurityChecks || isGraphql
+  // GraphqlScan / WebCachePoison SECTION_INPUT_MAP = [BaseURL, Endpoint]. Per
+  // PROMPT.ADD_PARTIAL_RECON.md, BaseURL-accepting tools get a URL textarea;
+  // Endpoint is graph-only (never manually entered).
+  const hasUrlInput = isResourceEnum || isArjun || isSecurityChecks || isGraphql || isWebCachePoison
 
   // Subdomain validation
   const subdomainValidation = useMemo(
@@ -579,6 +587,7 @@ export function PartialReconModal({
     || (toolId === 'JsRecon' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0 && uploadedJsFiles.length === 0)
     || (isNuclei && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0 && (graphInputs?.existing_subdomains_count ?? 0) === 0)
     || (isGraphql && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
+    || (isWebCachePoison && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
     || (toolId === 'ZapAjaxSpider' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
     || (isResourceEnum && !isNuclei && toolId !== 'JsRecon' && toolId !== 'ZapAjaxSpider' && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0)
     || (isArjun && !loadingInputs && (graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0)
@@ -593,6 +602,7 @@ export function PartialReconModal({
   const nmapNoPorts = isNmap && !includeGraphTargets && !customPorts.trim()
   const httpxNoPorts = isHttpx && !includeGraphTargets && !customPorts.trim() && !customSubdomains.trim()
   const resourceEnumNoUrls = isResourceEnum && !includeGraphTargets && !customUrls.trim() && !hasJsUploads
+  const webCachePoisonNoUrls = isWebCachePoison && !includeGraphTargets && !customUrls.trim()
   const zapAjaxSpiderNoUrls = toolId === 'ZapAjaxSpider' && !loadingInputs && !customUrls.trim() && (!includeGraphTargets || ((graphInputs?.existing_baseurls_count ?? 0) === 0 && (graphInputs?.existing_endpoints_count ?? 0) === 0))
   const arjunNoUrls = isArjun && !includeGraphTargets && !customUrls.trim()
   const securityChecksNoUrls = isSecurityChecks && !includeGraphTargets && !customUrls.trim() && !customSubdomains.trim() && !customIps.trim()
@@ -649,6 +659,8 @@ export function PartialReconModal({
                 ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints, ${graphInputs?.existing_subdomains_count ?? 0} Subdomains)`
                 : isGraphql
                 ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints${graphInputs?.existing_graphql_endpoints_count ? `, ${graphInputs.existing_graphql_endpoints_count} already-flagged GraphQL` : ''})`
+                : isWebCachePoison
+                ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs, ${graphInputs?.existing_endpoints_count ?? 0} Endpoints)`
                 : isResourceEnum
                 ? `${domain || 'No domain'} (${graphInputs?.existing_baseurls_count ?? 0} BaseURLs)`
                 : isArjun
@@ -832,6 +844,14 @@ export function PartialReconModal({
             Arjun requires endpoints to test for parameters. Provide custom URLs below or enable graph targets (which include existing BaseURLs + Endpoints from crawling).
           </div>
         )}
+        {webCachePoisonNoUrls && !noTargetsToScan && (
+          <div style={{
+            fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            Web Cache Poisoning requires live URLs to test. Provide custom URLs below or enable graph targets (which include existing BaseURLs + Endpoints from crawling).
+          </div>
+        )}
         {securityChecksNoUrls && !noTargetsToScan && (
           <div style={{
             fontSize: '11px', color: '#f87171', lineHeight: '1.5', padding: '8px 12px', borderRadius: '6px',
@@ -984,6 +1004,8 @@ export function PartialReconModal({
                 ? 'https://example.com/assets/app.js\nhttps://cdn.example.com/bundle.min.js'
                 : isGraphql
                 ? 'https://api.example.com/graphql\nhttps://api.example.com/v1/graphql'
+                : isWebCachePoison
+                ? 'https://example.com/\nhttps://example.com/home?lang=en'
                 : 'https://example.com\nhttps://api.example.com:8443'}
               rows={2}
               style={textareaStyle(urlValidation.errors.length > 0)}
@@ -1005,6 +1027,8 @@ export function PartialReconModal({
                 ? 'Full URLs (http/https). Will be scanned for vulnerabilities, misconfigurations, and CVEs.'
                 : isGraphql
                 ? 'GraphQL endpoint URLs (e.g. /graphql, /api/graphql). Bypasses auto-discovery and tests these directly via introspection + graphql-cop checks.'
+                : isWebCachePoison
+                ? 'Full URLs (http/https) to test for cache poisoning. Only cacheable URLs are probed; tests use benign canaries in isolated cache buckets.'
                 : 'Full URLs (http/https). Will be crawled to discover endpoints and parameters.'}</div>
             )}
 
@@ -1167,14 +1191,14 @@ export function PartialReconModal({
           <button
             type="button"
             onClick={handleRun}
-            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps}
+            disabled={!domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || webCachePoisonNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps}
             style={{
               padding: '8px 16px', borderRadius: '6px', border: 'none',
               backgroundColor: '#3b82f6', color: '#fff',
-              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 'not-allowed' : 'pointer',
+              cursor: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || webCachePoisonNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 'not-allowed' : 'pointer',
               fontSize: '13px',
               display: 'flex', alignItems: 'center', gap: '6px',
-              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 0.5 : 1,
+              opacity: !domain || isStarting || hasValidationErrors || noTargetsToScan || nmapNoPorts || httpxNoPorts || resourceEnumNoUrls || zapAjaxSpiderNoUrls || arjunNoUrls || webCachePoisonNoUrls || securityChecksNoUrls || shodanNoIps || osintNoIps ? 0.5 : 1,
             }}
           >
             {isStarting ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}

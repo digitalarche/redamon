@@ -58,6 +58,7 @@ import { JsReconSection } from './sections/JsReconSection'
 import { GraphqlScanSection } from './sections/GraphqlScanSection'
 import { TakeoverSection } from './sections/TakeoverSection'
 import { VhostSniSection } from './sections/VhostSniSection'
+import { WebCachePoisonSection } from './sections/WebCachePoisonSection'
 import { PartialReconModal } from './WorkflowView/PartialReconModal'
 import { ReconPresetModal } from './ReconPresetModal'
 import { ProviderRequiredModal, ModelSelectionModal } from './ProjectLlmGate'
@@ -65,6 +66,7 @@ import { seedInitialModels, needsModelGate, hasNoConfiguredProvider } from './pr
 import { SavePresetModal } from './SavePresetModal'
 import { UserPresetDrawer } from './UserPresetDrawer'
 import { getPresetById, type ReconPreset } from '@/lib/recon-presets'
+import { PRESET_EXCLUDED_FIELDS } from '@/lib/project-preset-utils'
 
 const WorkflowView = dynamic(
   () => import('./WorkflowView/WorkflowView').then(m => ({ default: m.WorkflowView })),
@@ -394,17 +396,62 @@ export function ProjectForm({
   }
 
   const applyPreset = useCallback(async (preset: ReconPreset) => {
-    // Only apply the preset's own parameters (recon pipeline fields only).
-    // User-entered fields (name, targetDomain, etc.) are preserved because
-    // preset.parameters only contains recon-relevant keys.
-    setFormData(prev => ({ ...prev, ...preset.parameters }))
+    // Apply ONLY this preset's settings on a clean backend-defaults baseline, so the
+    // resulting recon config never depends on whichever preset was selected before
+    // (no merge-from-previous-state — that made disabled tools "stick" across presets).
+    // /api/projects/defaults carries no target-identity keys (name, targetDomain, IPs,
+    // RoE), so the spread base `...prev` preserves everything the user entered; the
+    // defaults reset every recon-tool field to its baseline; the preset then overrides
+    // only the fields it explicitly declares. Mirrors the user-preset load path.
+    let defaults: Record<string, unknown> = {}
+    try {
+      const res = await fetch('/api/projects/defaults')
+      if (res.ok) defaults = await res.json()
+    } catch {
+      // Defaults unavailable: fall back to a plain merge so applying still works.
+    }
+    setFormData(prev => {
+      const p = prev as Record<string, unknown>
+      const d = defaults as Record<string, unknown>
+      // Start from the current form and reset every EXISTING field to its backend
+      // default. ONLY touch keys already present in the form: the /defaults blob also
+      // carries recon/agent settings that are NOT Project columns (e.g.
+      // takeoverCnameValidationEnabled), and writing those back makes the project
+      // update fail with a Prisma "Unknown argument" error.
+      const next: Record<string, unknown> = { ...p }
+      for (const key of Object.keys(p)) {
+        if (key in d) next[key] = d[key]
+      }
+      // Apply ONLY this preset's settings (all keys here are valid Project columns).
+      Object.assign(next, preset.parameters)
+      // A preset defines recon-tool config ONLY. Resetting to defaults must NOT reset
+      // things presets never own: target identity/files (PRESET_EXCLUDED_FIELDS), the
+      // user's LLM model choice, or RoE scope/client info (a safety boundary).
+      for (const key of PRESET_EXCLUDED_FIELDS) next[key] = p[key]
+      for (const key of Object.keys(p)) {
+        if (key.startsWith('roe')) next[key] = p[key]
+      }
+      next.agentOpenaiModel = p.agentOpenaiModel
+      next.aiPipelineModel = p.aiPipelineModel
+      return next as ProjectFormData
+    })
     setAppliedPreset(preset)
     setIsPresetModalOpen(false)
     toast.success(`Recon preset "${preset.name}" applied`, 'Preset Applied')
   }, [toast])
 
   const handleLoadUserPreset = useCallback((settings: Record<string, unknown>) => {
-    setFormData(prev => ({ ...prev, ...settings } as ProjectFormData))
+    // Only apply keys that already exist in the form: the merged settings can carry
+    // backend-default keys that aren't Project columns (e.g. takeoverCnameValidationEnabled),
+    // which would make the project update fail. reconPresetId is kept (handled below).
+    setFormData(prev => {
+      const p = prev as Record<string, unknown>
+      const next: Record<string, unknown> = { ...p }
+      for (const key of Object.keys(settings)) {
+        if (key in p) next[key] = settings[key]
+      }
+      return next as ProjectFormData
+    })
     // Sync recon preset badge
     if (settings.reconPresetId) {
       setAppliedPreset(getPresetById(settings.reconPresetId as string) ?? null)
@@ -876,6 +923,7 @@ export function ProjectForm({
             <TakeoverSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('SubdomainTakeover') : undefined} />
             <VhostSniSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('VhostSni') : undefined} />
             <GraphqlScanSection data={formData} updateField={updateField} projectId={projectId} mode={mode} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('GraphqlScan') : undefined} />
+            <WebCachePoisonSection data={formData} updateField={updateField} onRun={mode === 'edit' && projectId ? () => setPartialReconToolId('WebCachePoison') : undefined} />
           </>
         )}
 

@@ -140,6 +140,7 @@ These scripts and binaries are downloaded into `/opt/tools/{linux,windows}/` and
 | **zeep** | Python SOAP client (WS-Security / XSW probing in the SOAP Chat Skill) | MIT | https://github.com/mvantellingen/python-zeep | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
 | **python3-saml** | SAML toolkit (XSW / Comment Injection / Golden SAML construction in the SAML Chat Skill) | MIT | https://github.com/SAML-Toolkits/python3-saml | Installed via `pip` in `mcp/kali-sandbox/Dockerfile` |
 | **OWASP ZAP (Zed Attack Proxy)** | Browser-driven (headless Firefox) Ajax Spider for resource enumeration of JS-heavy SPAs | Apache-2.0 | https://github.com/zaproxy/zaproxy | Pulled as Docker image `ghcr.io/zaproxy/zaproxy:stable` at runtime by the recon container (`recon/helpers/resource_enum/zap_ajax_spider_helpers.py`); run with `--net=host` via the ZAP Automation Framework. RedAmon never imports from ZAP; results are parsed from an exported artifact (process + filesystem boundary). |
+| **Web Cache Vulnerability Scanner (WCVS)** | Web cache poisoning & deception scanning (header/parameter cache-key probing) for the cache-poisoning recon module | Apache-2.0 | https://github.com/Hackmanit/Web-Cache-Vulnerability-Scanner | Go binary built from source into the local image `redamon-wcvs:latest` (`wcvs/Dockerfile`); run as a separate `docker run` subprocess from the recon container (`recon/cache_scan/wcvs_runner.py`). RedAmon never links WCVS code; output is parsed from JSON (process boundary, mere aggregation). |
 
 ---
 

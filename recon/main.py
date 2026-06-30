@@ -943,6 +943,43 @@ def run_ip_recon(target_ips: list, settings: dict) -> dict:
                 combined_result["metadata"].setdefault("phase_errors", {})["vuln_scan"] = str(e)
                 save_recon_file(combined_result, output_file)
 
+        # GROUP 6 Phase A (IP mode) — the remaining active vuln scanners. vuln_scan
+        # already ran above; here we fan out the same scanners the DOMAIN pipeline runs
+        # so an IP target also gets GraphQL / Subdomain-Takeover / VHost-SNI / Web Cache
+        # Poisoning coverage (previously these only ran for domain targets, so an IP
+        # scan silently skipped them).
+        ip_phase_a: dict = {}
+        if settings.get('GRAPHQL_SECURITY_ENABLED', False):
+            from recon.graphql_scan import run_graphql_scan_isolated
+            ip_phase_a['graphql_scan'] = run_graphql_scan_isolated
+        if settings.get('SUBDOMAIN_TAKEOVER_ENABLED', False):
+            from recon.main_recon_modules.subdomain_takeover import run_subdomain_takeover_isolated
+            ip_phase_a['subdomain_takeover'] = run_subdomain_takeover_isolated
+        if settings.get('VHOST_SNI_ENABLED', False):
+            from recon.main_recon_modules.vhost_sni_enum import run_vhost_sni_enrichment_isolated
+            ip_phase_a['vhost_sni'] = run_vhost_sni_enrichment_isolated
+        if settings.get('WEB_CACHE_POISON_ENABLED', False):
+            from recon.cache_scan import run_cache_scan_isolated
+            ip_phase_a['cache_scan'] = run_cache_scan_isolated
+
+        if ip_phase_a:
+            print(f"\n[*][Pipeline] GROUP 6 Phase A: Active Vulnerability Scanning (fan-out: {', '.join(ip_phase_a.keys())})")
+            print("-" * 40)
+            with ThreadPoolExecutor(max_workers=len(ip_phase_a)) as pool:
+                futures = {pool.submit(fn, combined_result, settings): key
+                           for key, fn in ip_phase_a.items()}
+                for fut in as_completed(futures):
+                    key = futures[fut]
+                    try:
+                        combined_result[key] = fut.result()
+                        combined_result["metadata"]["modules_executed"].append(key)
+                        save_recon_file(combined_result, output_file)
+                        _graph_update_bg(f"update_graph_from_{key}", combined_result, USER_ID, PROJECT_ID)
+                    except Exception as e:
+                        print(f"[!][Pipeline] {key} failed: {e}")
+                        combined_result["metadata"].setdefault("phase_errors", {})[key] = str(e)
+                        save_recon_file(combined_result, output_file)
+
     # External Domains -- aggregate from all sources and persist
     try:
         ext_domains = _aggregate_external_domains(combined_result)
@@ -1450,6 +1487,9 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
         if _settings.get('VHOST_SNI_ENABLED', False):
             from recon.main_recon_modules.vhost_sni_enum import run_vhost_sni_enrichment_isolated
             phase_a_tools['vhost_sni'] = run_vhost_sni_enrichment_isolated
+        if _settings.get('WEB_CACHE_POISON_ENABLED', False):
+            from recon.cache_scan import run_cache_scan_isolated
+            phase_a_tools['cache_scan'] = run_cache_scan_isolated
 
         if phase_a_tools:
             print(f"\n[*][Pipeline] GROUP 6 Phase A: Active Vulnerability Scanning (fan-out: {', '.join(phase_a_tools.keys())})")
@@ -1567,6 +1607,16 @@ def run_domain_recon(target: str, anonymous: bool = False, bruteforce: bool = Fa
                       f"(Critical: {graphql_summary['by_severity']['critical']}, " +
                       f"High: {graphql_summary['by_severity']['high']}, " +
                       f"Medium: {graphql_summary['by_severity']['medium']})")
+
+    # Web cache poisoning stats
+    if _settings.get('WEB_CACHE_POISON_ENABLED', False) and "cache_scan" in combined_result:
+        cache_summary = combined_result["cache_scan"].get("summary", {})
+        total = cache_summary.get('total_findings', 0)
+        if total > 0:
+            print(f"[+][CachePoison] Findings: {total} "
+                  f"(Confirmed: {cache_summary.get('confirmed', 0)}, "
+                  f"Strong: {cache_summary.get('strong', 0)}) "
+                  f"across {cache_summary.get('cacheable_urls', 0)} cacheable URL(s)")
 
     print(f"[+][Pipeline] Output saved: {output_file}")
     print(f"{'=' * 70}")

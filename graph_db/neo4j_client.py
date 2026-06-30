@@ -7,7 +7,7 @@ Usage:
         client.update_graph_from_domain_discovery(recon_data, user_id, project_id)
 
 All methods are provided by the mixin classes combined via multiple inheritance.
-MRO: BaseMixin → ReconMixin → GvmMixin → SecretMixin → OsintMixin → GraphQLMixin
+MRO: BaseMixin → ReconMixin → GvmMixin → SecretMixin → OsintMixin → GraphQLMixin → CacheMixin
 """
 
 from graph_db.mixins.base_mixin import BaseMixin
@@ -16,9 +16,10 @@ from graph_db.mixins.gvm_mixin import GvmMixin
 from graph_db.mixins.secret_mixin import SecretMixin
 from graph_db.mixins.osint_mixin import OsintMixin
 from graph_db.mixins.graphql_mixin import GraphQLMixin
+from graph_db.mixins.cache_mixin import CacheMixin
 
 
-class Neo4jClient(BaseMixin, ReconMixin, GvmMixin, SecretMixin, OsintMixin, GraphQLMixin):
+class Neo4jClient(BaseMixin, ReconMixin, GvmMixin, SecretMixin, OsintMixin, GraphQLMixin, CacheMixin):
     """
     Public Neo4j client for RedAmon. All methods provided by mixins.
 
@@ -28,5 +29,6 @@ class Neo4jClient(BaseMixin, ReconMixin, GvmMixin, SecretMixin, OsintMixin, Grap
     Secret detection (GitHub hunt, TruffleHog): SecretMixin
     OSINT enrichment (Shodan, Censys, FOFA, OTX, etc.): OsintMixin
     GraphQL security scanning integration: GraphQLMixin
+    Web cache poisoning scanning integration: CacheMixin
     """
     pass

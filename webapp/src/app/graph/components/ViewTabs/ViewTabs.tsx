@@ -2,7 +2,7 @@
 
 import { memo, useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers, Bot, Radiation, Swords } from 'lucide-react'
+import { Waypoints, Table2, Terminal, Shield, Search, Download, Loader2, SquareTerminal, Filter, Plus, Trash2, X, ChevronDown, Code, Target, Zap, Flag, Key, Server, Boxes, LockKeyhole, Bug, Network, Mail, ShieldAlert, Package, History, Layers, Bot, Radiation, Swords, Droplets } from 'lucide-react'
 import { Toggle } from '@/components/ui'
 import { AUTO_2D_THRESHOLD } from '../GraphCanvas'
 import styles from './ViewTabs.module.css'
@@ -28,6 +28,7 @@ export type TableViewMode =
   | 'threatIntel'
   | 'supplyChain'
   | 'dnsDrift'
+  | 'webCachePoison'
 
 const TABLE_MODE_LABELS: Record<TableViewMode, string> = {
   nodeDetails: 'Node Inspector',
@@ -48,6 +49,7 @@ const TABLE_MODE_LABELS: Record<TableViewMode, string> = {
   threatIntel: 'Threat Intel',
   supplyChain: 'Supply-Chain',
   dnsDrift: 'DNS Drift',
+  webCachePoison: 'Web Cache Poisoning',
 }
 
 export interface TunnelInfo {
@@ -301,6 +303,7 @@ export const ViewTabs = memo(function ViewTabs({
                 : mode === 'threatIntel' ? ShieldAlert
                 : mode === 'supplyChain' ? Package
                 : mode === 'dnsDrift' ? History
+                : mode === 'webCachePoison' ? Droplets
                 : Table2
               return <Icon size={14} />
             })()}
@@ -421,6 +424,12 @@ export const ViewTabs = memo(function ViewTabs({
                 onClick={() => { onTableViewModeChange?.('dnsDrift'); setTableMenuOpen(false); onViewChange('table') }}
               >
                 <History size={12} /> Historic DNS Drift
+              </button>
+              <button
+                className={`${styles.tableDropdownItem} ${tableViewMode === 'webCachePoison' ? styles.tableDropdownItemActive : ''}`}
+                onClick={() => { onTableViewModeChange?.('webCachePoison'); setTableMenuOpen(false); onViewChange('table') }}
+              >
+                <Droplets size={12} /> Web Cache Poisoning
               </button>
             </div>
           )}

@@ -260,6 +260,16 @@ services:
     image: redamon-trufflehog:latest
     profiles: ["tools"]
 
+  # WCVS (Web Cache Vulnerability Scanner) — breadth engine for the cache
+  # poisoning module. Build-only: the recon container runs it docker-in-docker.
+  # See recon/cache_scan/ and wcvs/Dockerfile.
+  wcvs:
+    build:
+      context: ./wcvs
+      dockerfile: Dockerfile
+    image: redamon-wcvs:latest
+    profiles: ["tools"]
+
   # CodeFix build sandbox: runs the UNTRUSTED clone+build+test step of the
   # CypherFix agent in isolation (threats T6/E10). Spawned ephemerally per job by
   # recon_orchestrator/container_manager.py with no secrets, cap_drop=ALL,

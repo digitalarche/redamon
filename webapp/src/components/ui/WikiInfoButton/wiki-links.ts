@@ -69,6 +69,7 @@ export const TOOL_WIKI: Record<string, { page: string; anchor?: string }> = {
   GraphqlScan:        { page: 'GraphQL-Security-Testing' },
   SubdomainTakeover:  { page: 'Subdomain-Takeover-Detection' },
   VhostSni:           { page: 'VHost-and-SNI-Enumeration' },
+  WebCachePoison:     { page: 'Web-Cache-Poisoning' },
 
   // CVE & MITRE
   CveLookup:          { page: 'Project-Settings-Reference', anchor: 'cve-enrichment' },

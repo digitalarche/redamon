@@ -823,6 +823,41 @@ const VhostSni = (
   </div>
 )
 
+const WebCachePoison = (
+  <div style={wrapperStyle}>
+    <div style={firstSectionTitleStyle}>How input is generated</div>
+    <p style={paraStyle}>
+      Web Cache Poisoning scans the live URLs already discovered by recon. The target list is the union of every probed <strong>BaseURL</strong> and every parameterized <strong>Endpoint</strong>, the same source set Nuclei uses. The technology fingerprint recorded on those nodes decides which framework-specific tests are eligible.
+    </p>
+    <ul style={listStyle}>
+      <li><strong>BaseURL</strong> nodes confirmed live by HTTP probing.</li>
+      <li><strong>Endpoint</strong> nodes discovered by crawling and parameter discovery.</li>
+      <li>Hosts excluded by the Rules of Engagement are filtered out before any request is sent.</li>
+    </ul>
+    <p style={paraStyle}>
+      Each URL is first checked for a usable cache (hit/miss signal from cache headers). Only cacheable URLs proceed. A unique cache-buster isolates every test into its own cache slot, so the real cache is never poisoned. The WCVS engine performs a broad sweep, then a native confirmation re-tests each candidate: it fetches a clean baseline, fetches again with a benign canary payload, then fetches a third time as an innocent visitor and checks whether the canary persisted from cache.
+    </p>
+    <p style={paraStyle}>
+      In partial recon, the modal accepts custom <strong>URL</strong> inputs, attached to an existing BaseURL or recorded as generic user input. These are merged with the graph-derived targets unless graph targets are disabled.
+    </p>
+
+    <div style={sectionTitleStyle}>How output transforms the graph</div>
+    <ul style={listStyle}>
+      <li>Each confirmed finding produces a <strong>Vulnerability</strong> node typed as <em>Web Cache Poisoning</em>, carrying the unkeyed vector (header or parameter), the impact class (stored XSS, open redirect, deception, or denial of service), a confidence score and tier (Confirmed, Strong, or Tentative), and a reproduction link.</li>
+      <li>The Vulnerability is attached to the affected <strong>Endpoint</strong> via <span style={codeStyle}>HAS_VULNERABILITY</span>, and to the parent <strong>BaseURL</strong> as well for host-level findings.</li>
+      <li>If crawling never created the affected Endpoint or BaseURL, the scan creates them so the finding is never orphaned.</li>
+    </ul>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      Findings are deduplicated per <em>(technique + URL + vector)</em>. Re-running updates the existing Vulnerability rather than creating duplicates. Only findings at or above the configured confidence threshold are stored.
+    </p>
+
+    <div style={sectionTitleStyle}>When the scan refuses to start</div>
+    <p style={{ ...paraStyle, margin: 0 }}>
+      If there are no live BaseURLs in the graph and no custom URLs were provided in the modal, or if none of the target URLs are served through a cache, there is nothing to test.
+    </p>
+  </div>
+)
+
 const SecurityChecks = (
   <div style={wrapperStyle}>
     <div style={firstSectionTitleStyle}>How input is generated</div>
@@ -940,6 +975,7 @@ export const INPUT_LOGIC_TOOLTIPS: Record<string, ReactNode> = {
   GraphqlScan,
   SubdomainTakeover,
   VhostSni,
+  WebCachePoison,
   SecurityChecks,
   CveLookup,
   Mitre,

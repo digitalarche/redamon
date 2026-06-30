@@ -247,6 +247,7 @@ Bug bounty hunters who have already triaged a target (perhaps with the Quick Win
     //     DoS probes (alias overloading / array batching / directive overloading /
     //     circular introspection) which default-on and frequently trigger WAF bans.
     graphqlSecurityEnabled: true,
+    webCachePoisonEnabled: true,
     graphqlCopEnabled: true,
     graphqlCopTestAliasOverloading: false,
     graphqlCopTestBatchQuery: false,

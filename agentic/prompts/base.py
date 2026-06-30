@@ -1545,13 +1545,13 @@ Each node has `user_id` and `project_id` properties for tenant isolation (handle
 - Vulnerability nodes = findings from scanners (nuclei, gvm, security_check, netlas)
 - CVE nodes = known CVEs linked to technologies detected on the target
 
-**Vulnerability** - Scanner findings (from nuclei, gvm, security checks, netlas, graphql_scan)
+**Vulnerability** - Scanner findings (from nuclei, gvm, security checks, netlas, graphql_scan, cache_poisoning)
 
 Common properties (all sources):
 - id (string): unique identifier
 - name (string): vulnerability name
 - severity (string): "critical", "high", "medium", "low", "info" (lowercase!)
-- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl), **"ai_surface_recon"** (MCP tool-poisoning / prompt-injection-via-tool-description / data-exfiltration found by static YARA over MCP manifests; carries `ai_owasp_llm_id`, `ai_atlas_technique`, `type` like "mcp_tool_poisoning"), or **"garak"** / **"pyrit"** / **"giskard"** / **"promptfoo"** (AI Attack Surface — deterministic offensive testing of discovered LLM endpoints; `type` like "ai_attack_jailbreak"/"ai_attack_prompt_injection", carries `ai_owasp_llm_id` (LLM01..LLM10, or "safety" for toxicity/harmful), `ai_asr` (attack success rate 0–1), `ai_trials`, `ai_oracle_kind`, `ai_payload_class` like "garak-dan"/"pyrit-crescendo"/"promptfoo-beavertails", `ai_transcript_ref` (path to the native report), linked to the attacked `Endpoint` via `HAS_VULNERABILITY`; promptfoo runs broad red-team dataset plugins and reports per-plugin ASR as corroboration)
+- source (string): **"nuclei"** (DAST/web), **"gvm"** (network/OpenVAS), **"security_check"**, **"netlas"** (passive NVD-based), **"graphql_scan"** (GraphQL security testing), **"takeover_scan"** (subdomain takeover via Subjack + Nuclei takeover templates), **"vhost_sni_enum"** (hidden virtual host / SNI routing anomalies via curl), **"cache_poisoning"** (web cache poisoning + web cache deception, confirmed by WCVS breadth + a native baseline→poison→clean persistence check; carries `cache_header`/`cache_param` (the unkeyed vector), `cache_impact` ("stored_xss"/"open_redirect"/"deception"/"dos"/"reflected"), `cache_technique`, `confidence` (0–1) + `confidence_tier` ("Confirmed"/"Strong"/"Tentative"), `cache_signals`, `poc_link`; linked to the affected `Endpoint`/`BaseURL` via `HAS_VULNERABILITY`), **"ai_surface_recon"** (MCP tool-poisoning / prompt-injection-via-tool-description / data-exfiltration found by static YARA over MCP manifests; carries `ai_owasp_llm_id`, `ai_atlas_technique`, `type` like "mcp_tool_poisoning"), or **"garak"** / **"pyrit"** / **"giskard"** / **"promptfoo"** (AI Attack Surface — deterministic offensive testing of discovered LLM endpoints; `type` like "ai_attack_jailbreak"/"ai_attack_prompt_injection", carries `ai_owasp_llm_id` (LLM01..LLM10, or "safety" for toxicity/harmful), `ai_asr` (attack success rate 0–1), `ai_trials`, `ai_oracle_kind`, `ai_payload_class` like "garak-dan"/"pyrit-crescendo"/"promptfoo-beavertails", `ai_transcript_ref` (path to the native report), linked to the attacked `Endpoint` via `HAS_VULNERABILITY`; promptfoo runs broad red-team dataset plugins and reports per-plugin ASR as corroboration)
 - description (string): vulnerability description
 - cvss_score (float): 0.0 to 10.0
 
@@ -1641,6 +1641,21 @@ VHost & SNI properties (source="vhost_sni_enum"):
 - Subdomain enrichment (set on (:Subdomain) nodes flagged as hidden vhosts): vhost_tested (bool), vhost_hidden (bool), vhost_routing_layer ("L7"|"L4"|"both"), vhost_status_code (int), vhost_size_delta (int), sni_routed (bool), vhost_tested_at (ISO ts)
 - IP enrichment (set on (:IP) nodes that have been probed): vhost_sni_tested (bool), vhost_baseline_status (int), vhost_baseline_size (int), vhost_candidates_tested (int — total candidate hostnames probed against this IP), vhost_ports_tested (int — number of (port, scheme) pairs that produced a usable baseline), hosts_hidden_vhosts (bool), hidden_vhost_count (int), is_reverse_proxy (bool), vhost_sni_tested_at (ISO ts)
 - Typical query: "list hidden admin panels uncovered by vhost enumeration" → `MATCH (s:Subdomain)-[:HAS_VULNERABILITY]->(v:Vulnerability {source: 'vhost_sni_enum'}) WHERE v.internal_pattern_match IS NOT NULL RETURN s.name AS hostname, v.ip, v.port, v.layer, v.severity, v.internal_pattern_match`
+
+Web cache poisoning properties (source="cache_poisoning"):
+- vulnerability_type (string): always "web_cache_poisoning"
+- cache_header (string): the unkeyed request header used as the poisoning vector (e.g. "X-Forwarded-Host"), empty if the vector was a parameter
+- cache_param (string): the unkeyed query parameter vector, empty if the vector was a header
+- cache_vector_type (string): "header" | "param" | "path" (path = web cache deception)
+- cache_impact (string): "stored_xss" | "open_redirect" | "deception" | "dos" | "reflected"
+- cache_technique (string): e.g. "unkeyed_header", "unkeyed_param", "cache_deception", "framework_next", "framework_remix"
+- confidence (float 0–1) and confidence_tier (string): "Confirmed" (canary persisted on a clean request + cache hit), "Strong", "Tentative"
+- cache_signals (list[string]): cache fingerprint evidence (e.g. "x-cache: hit", "age: 30")
+- cache_buster (string): the isolated cache-buster used so the test never poisoned the real entry
+- source_engine (string): "wcvs" (surfaced by the WCVS breadth engine) or "hypothesis" (native framework/generic pack)
+- poc_link (string), curl_verify (string): reproduction; evidence (string): JSON blob with baseline/poisoned/clean hashes
+- id pattern: `cache_{user_id}_{project_id}_{technique}_{baseurl}_{path}_{vector}` — deterministic, MERGE-safe
+- Typical query: "list confirmed cache poisoning findings" → `MATCH (e:Endpoint)-[:HAS_VULNERABILITY]->(v:Vulnerability {source: 'cache_poisoning'}) WHERE v.confidence_tier = 'Confirmed' RETURN e.url, v.cache_header, v.cache_impact, v.confidence, v.poc_link`
 
 **CVE** - Known CVE entries (linked to Technologies)
 - id (string): "CVE-2021-41773", "CVE-2021-44228"

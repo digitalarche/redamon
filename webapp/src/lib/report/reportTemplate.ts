@@ -443,6 +443,7 @@ ${renderSecrets(data)}
 ${renderJsRecon(data)}
 ${renderGraphqlScan(data)}
 ${renderVhostSni(data)}
+${renderWebCachePoison(data)}
 ${renderAiSurface(data)}
 ${renderOtx(data)}
 ${renderAttackChains(data)}
@@ -508,6 +509,9 @@ function renderTOC(data: ReportData): string {
   }
   if (data.vhostSni.totalFindings > 0 || data.vhostSni.ipsTested > 0) {
     dynamicSections.push({ id: 'vhost-sni', label: 'VHost & SNI Enumeration' })
+  }
+  if (data.webCachePoison.totalFindings > 0) {
+    dynamicSections.push({ id: 'web-cache-poison', label: 'Web Cache Poisoning' })
   }
   if (data.aiSurface.totalAiEndpoints > 0 || data.aiSurface.ragIngestEndpoints > 0 || data.aiSurface.promptInjectableParams > 0
       || data.aiSurface.mcpServers > 0 || data.aiSurface.mcpPoisoningFindings > 0 || data.aiSurface.vectorDbs > 0
@@ -1349,6 +1353,65 @@ function renderVhostSni(data: ReportData): string {
     <tbody>${findingRows}</tbody>
   </table>
   ${vs.findings.length >= 50 ? '<p class="muted">Showing first 50 findings.</p>' : ''}` : '<p class="muted">No anomalies — all candidates returned the same response as the bare IP baseline.</p>'}
+</div>`
+}
+
+function renderWebCachePoison(data: ReportData): string {
+  const wc = data.webCachePoison
+  if (wc.totalFindings === 0) return ''
+
+  const sevRows = wc.bySeverity.map(s => `
+    <tr><td>${sevBadge(s.severity)}</td><td>${s.count}</td></tr>`).join('')
+
+  const impactRows = wc.byImpact.map(i => `
+    <tr><td>${esc(i.impact.replace(/_/g, ' '))}</td><td>${i.count}</td></tr>`).join('')
+
+  const findingRows = wc.findings.map(f => {
+    const vector = f.cacheHeader || f.cacheParam || '-'
+    const conf = f.confidence != null ? `${Math.round(f.confidence * 100)}%` : '-'
+    const tierColor = f.confidenceTier === 'Confirmed' ? '#dc2626' : f.confidenceTier === 'Strong' ? '#f59e0b' : '#6b7280'
+    const poc = f.pocLink
+      ? `<a href="${esc(f.pocLink)}" style="font-family:monospace;font-size:10px;color:#2563eb">link</a>`
+      : '-'
+    return `
+    <tr>
+      <td style="font-family:monospace;font-size:11px">${esc(f.endpoint)}</td>
+      <td>${sevBadge(f.severity)}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(vector)}</td>
+      <td>${esc(f.cacheImpact.replace(/_/g, ' '))}</td>
+      <td style="font-family:monospace;font-size:10px">${esc(f.cacheTechnique.replace(/_/g, ' '))}</td>
+      <td style="color:${tierColor};font-weight:600;font-size:11px">${esc(f.confidenceTier)} (${conf})</td>
+      <td>${poc}</td>
+    </tr>`
+  }).join('')
+
+  return `
+<div class="page-break"></div>
+<div class="section" id="web-cache-poison">
+  <h2 class="section-title">Web Cache Poisoning</h2>
+  <p style="margin-bottom:12px">Confirmed <strong>${wc.totalFindings}</strong> web cache poisoning finding(s) (<strong>${wc.confirmed}</strong> Confirmed, <strong>${wc.strong}</strong> Strong). These affect every visitor served the poisoned cache entry. All tests used benign canaries in isolated cache buckets.</p>
+  <div class="two-col">
+    <div>
+      <h3>By Severity</h3>
+      <table class="data-table">
+        <thead><tr><th>Severity</th><th>Count</th></tr></thead>
+        <tbody>${sevRows}</tbody>
+      </table>
+    </div>
+    <div>
+      <h3>By Impact</h3>
+      <table class="data-table">
+        <thead><tr><th>Impact</th><th>Count</th></tr></thead>
+        <tbody>${impactRows}</tbody>
+      </table>
+    </div>
+  </div>
+  <h3>Findings Detail</h3>
+  <table class="data-table">
+    <thead><tr><th>Endpoint</th><th>Severity</th><th>Vector</th><th>Impact</th><th>Technique</th><th>Confidence</th><th>PoC</th></tr></thead>
+    <tbody>${findingRows}</tbody>
+  </table>
+  ${wc.findings.length >= 50 ? '<p class="muted">Showing first 50 findings.</p>' : ''}
 </div>`
 }
 

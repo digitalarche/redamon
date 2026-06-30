@@ -268,6 +268,22 @@ function condenseForAgent(data: ReturnType<typeof gatherReportData> extends Prom
         internalPatternMatch: f.internalPatternMatch,
       })),
     },
+    webCachePoison: {
+      totalFindings: data.webCachePoison.totalFindings,
+      confirmed: data.webCachePoison.confirmed,
+      strong: data.webCachePoison.strong,
+      bySeverity: data.webCachePoison.bySeverity,
+      byImpact: data.webCachePoison.byImpact,
+      topFindings: data.webCachePoison.findings.slice(0, 15).map(f => ({
+        endpoint: f.endpoint,
+        severity: f.severity,
+        vector: f.cacheHeader || f.cacheParam || null,
+        impact: f.cacheImpact,
+        technique: f.cacheTechnique,
+        confidenceTier: f.confidenceTier,
+        confidence: f.confidence,
+      })),
+    },
     aiSurface: {
       totalAiEndpoints: data.aiSurface.totalAiEndpoints,
       ragIngestEndpoints: data.aiSurface.ragIngestEndpoints,
