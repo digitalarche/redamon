@@ -31,6 +31,30 @@ logger = logging.getLogger(__name__)
 # ANSI escape code pattern for stripping terminal colors from logs
 ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m|\033\[[0-9;]*m')
 
+
+def sibling_host_path(host_path: str, name: str) -> str:
+    """Return the sibling ``name`` of ``host_path`` on the DOCKER HOST filesystem.
+
+    Used to derive the host path of a sibling source dir (e.g. graph_db next to
+    recon) for sibling-container bind mounts. Must be robust to BOTH POSIX ('/')
+    and Windows ('\\') separators regardless of the OS running this code: the
+    orchestrator itself always runs Linux, but on Docker Desktop for Windows the
+    ``Source`` reported by ``docker inspect`` can be a Windows path
+    (``C:\\Users\\...\\recon``). ``pathlib.PurePosixPath.parent`` collapses such a
+    path to ``'.'`` (backslashes are not separators to it), yielding a relative
+    mount source that Docker Desktop silently materializes as an EMPTY directory,
+    which breaks the mounted Python package. This stays separator-aware so the
+    derived path is a real host path on every platform.
+
+    For POSIX sources this returns exactly what ``Path(host_path).parent / name``
+    would, so Linux/macOS behavior is unchanged.
+    """
+    p = host_path.rstrip("/\\")
+    idx = max(p.rfind("/"), p.rfind("\\"))
+    parent = p[:idx] if idx != -1 else p
+    sep = "\\" if ("\\" in p and "/" not in p) else "/"
+    return f"{parent}{sep}{name}"
+
 # Maximum number of concurrent partial recon runs per project
 MAX_PARALLEL_PARTIAL_RECONS = 12
 
@@ -445,7 +469,7 @@ class ContainerManager:
                     # Note: rw needed because output/data are subdirectories
                     f"{recon_path}": {"bind": "/app/recon", "mode": "rw"},
                     # Mount graph_db module
-                    f"{Path(recon_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
+                    sibling_host_path(recon_path, "graph_db"): {"bind": "/app/graph_db", "mode": "ro"},
                     # Mount /tmp for Docker-in-Docker temp files (avoids spaces in paths)
                     "/tmp/redamon": {"bind": "/tmp/redamon", "mode": "rw"},
                     # JS Recon shared volumes with webapp
@@ -1179,7 +1203,7 @@ class ContainerManager:
                     # privileged/arbitrary container; the broker rejects those.
                     BROKER_SOCKET_VOLUME: {"bind": "/var/run/broker", "mode": "rw"},
                     f"{recon_path}": {"bind": "/app/recon", "mode": "rw"},
-                    f"{Path(recon_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
+                    sibling_host_path(recon_path, "graph_db"): {"bind": "/app/graph_db", "mode": "ro"},
                     "/tmp/redamon": {"bind": "/tmp/redamon", "mode": "rw"},
                     # JS Recon shared volumes with webapp (uploaded files + custom patterns)
                     "redamon_js_recon_uploads": {"bind": "/data/js-recon-uploads", "mode": "ro"},
@@ -1936,7 +1960,7 @@ class ContainerManager:
                     # GVM scan output (read-write, for saving results)
                     f"{gvm_scan_path}/output": {"bind": "/app/gvm_scan/output", "mode": "rw"},
                     # Mount graph_db module for Neo4j updates
-                    f"{Path(recon_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
+                    sibling_host_path(recon_path, "graph_db"): {"bind": "/app/graph_db", "mode": "ro"},
                     # Mount gvm_scan source for development (no rebuild needed)
                     f"{gvm_scan_path}": {"bind": "/app/gvm_scan", "mode": "rw"},
                 },
@@ -2326,7 +2350,7 @@ class ContainerManager:
                     # Mount github_secret_hunt source for development (no rebuild needed)
                     f"{github_hunt_path}": {"bind": "/app/github_secret_hunt", "mode": "rw"},
                     # Mount graph_db module for Neo4j integration
-                    f"{Path(github_hunt_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
+                    sibling_host_path(github_hunt_path, "graph_db"): {"bind": "/app/graph_db", "mode": "ro"},
                 },
                 command="python github_secret_hunt/main.py",
             )
@@ -2708,7 +2732,7 @@ class ContainerManager:
                     # Mount trufflehog_scan source for development (no rebuild needed)
                     f"{trufflehog_path}": {"bind": "/app/trufflehog_scan", "mode": "rw"},
                     # Mount graph_db module for Neo4j integration
-                    f"{Path(trufflehog_path).parent}/graph_db": {"bind": "/app/graph_db", "mode": "ro"},
+                    sibling_host_path(trufflehog_path, "graph_db"): {"bind": "/app/graph_db", "mode": "ro"},
                 },
                 command="python trufflehog_scan/main.py",
             )

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.2] - 2026-07-06
+
+### Fixed
+
+- **Recon graph writes silently broken on Windows (`cannot import name 'Neo4jClient' from 'graph_db' (unknown location)`)** ([recon_orchestrator/container_manager.py](recon_orchestrator/container_manager.py)). Every spawned scan container (recon / partial-recon / gvm / github-hunt / trufflehog) bind-mounts the host `graph_db/` package over `/app/graph_db`, deriving its host path as the sibling of the recon source via `Path(recon_path).parent / "graph_db"`. The orchestrator always runs Linux, so `PurePosixPath.parent` treats a Windows-style Docker `Source` (`C:\Users\...\recon`, as Docker Desktop reports it when the repo lives on the Windows filesystem) as a single path component and collapses it to the **relative** string `graph_db`. Docker Desktop then materializes that non-existent source as an **empty directory**, so Python imports `graph_db` as a PEP 420 namespace package with no `__init__.py` and every graph read/clear/update in the recon pipeline fails with the `(unknown location)` `ImportError` — the graph is never cleared and no recon nodes are ever written (agent-side writes still worked because the `agent` container bakes `graph_db` into its image). Replaced the five fragile derivations with a separator-aware `sibling_host_path()` helper that strips the final component on either `/` or `\`, yielding a real absolute host path on Windows while producing byte-identical output to the old code on Linux/macOS (zero behavior change there). Fixes apply automatically via `./redamon.sh update` (volume-mounted source, restart-only — no rebuild). Covered by [tests/test_sibling_host_path.py](tests/test_sibling_host_path.py), which imports the shipped function, pins the cross-platform output, and reproduces + guards against the exact Windows regression.
+
+---
+
 ## [5.3.1] - 2026-07-05
 
 ### Security
