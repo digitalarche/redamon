@@ -277,6 +277,7 @@ def _write_attack_chain(
         ac.created_at     = datetime(),
         ac.updated_at     = datetime()
     ON MATCH SET
+        ac.attack_path_type = $attack_path_type,
         ac.updated_at     = datetime()
     // --- Specific target bridges (only ONE is created) ---
     // Priority: IP > Subdomain > Port > CVE > Domain (fallback)
@@ -1407,6 +1408,43 @@ def _write_chain_status(
             "successful_steps": successful_steps,
             "failed_steps": failed_steps,
             "phases_reached": phases_reached or [],
+        })
+
+
+def fire_update_chain_attack_path(
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+    *,
+    chain_id: str,
+    attack_path_type: str,
+) -> None:
+    """Persist a mid-run attack-skill switch to the AttackChain node.
+
+    Called from the think_node switch_skill handler so the graph/UI reflect the
+    new class. Fire-and-forget; core skill behavior does not depend on it.
+    """
+    if not neo4j_uri or not neo4j_password:
+        return
+    _fire_and_forget(
+        _write_chain_attack_path,
+        neo4j_uri, neo4j_user, neo4j_password,
+        chain_id=chain_id,
+        attack_path_type=attack_path_type,
+    )
+
+
+def _write_chain_attack_path(uri, user, password, *, chain_id, attack_path_type):
+    driver = _get_driver(uri, user, password)
+    cypher = """
+    MATCH (ac:AttackChain {chain_id: $chain_id})
+    SET ac.attack_path_type = $attack_path_type,
+        ac.updated_at       = datetime()
+    """
+    with driver.session() as session:
+        session.run(cypher, {
+            "chain_id": chain_id,
+            "attack_path_type": attack_path_type or "",
         })
     logger.info("AttackChain %s status -> %s (steps=%d)", chain_id, status, total_steps)
 

@@ -204,6 +204,8 @@ export interface InitPayload {
   project_id: string
   session_id: string
   graph_view_cypher?: string
+  // STRIDE S6: short-lived ticket minted by the webapp, verified by the agent.
+  ticket?: string
 }
 
 export interface QueryPayload {

@@ -487,13 +487,17 @@ TOOL_REGISTRY = {
         ),
     },
     "execute_curl": {
-        "purpose": "HTTP requests",
-        "when_to_use": "Reachability checks, headers, status codes",
+        "purpose": "HTTP requests & manual injection/reflection probing",
+        "when_to_use": "Reachability, headers, status codes, AND manual payload probing: inject a canary/marker into a param/header/cookie and read where it lands in the raw response body",
         "args_format": '"args": "curl command arguments without \'curl\' prefix"',
         "description": (
-            '**execute_curl** (HTTP requests)\n'
+            '**execute_curl** (HTTP requests & manual injection probing)\n'
             '   - Make HTTP requests for reachability, headers, banners\n'
-            '   - Do NOT use for vuln probing — use execute_nuclei instead'
+            '   - PRIMARY tool for manual black-box injection probing (XSS, SQLi, SSTI, LFI, cmd injection):\n'
+            '     send a unique canary in a parameter/header/cookie, then inspect the raw body to see\n'
+            '     WHERE it reflects and WHICH characters survive the filter — the exact response text is\n'
+            '     the oracle. execute_nuclei covers known-CVE templates only; use curl for bespoke,\n'
+            '     reflection-driven probing and payload iteration.'
         ),
     },
     "execute_httpx": {

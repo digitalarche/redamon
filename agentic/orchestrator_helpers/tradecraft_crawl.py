@@ -109,28 +109,50 @@ def _is_private_host(host: str) -> bool:
     return False
 
 
-async def _http_fetch(url: str, timeout: int = 15) -> str:
+async def _http_fetch(url: str, timeout: int = 15, max_redirects: int = 5) -> str:
     """Plain Tier 1 HTTP fetch, returns raw HTML or '' on failure.
 
     Used by the crawl loop FIRST so static blogs / news sites / writeup pages
     get fast unencumbered fetches. Falls back to Playwright only when the
     response is thin or non-HTML.
+
+    STRIDE I18: redirects are followed MANUALLY so every hop's URL is checked by
+    the SSRF guard. httpx's built-in follow_redirects hides the redirect target,
+    letting a public page 302 the fetch into 169.254.169.254 / an RFC-1918 host;
+    following hops by hand lets us re-validate each one.
     """
     try:
         import httpx as _httpx  # local import keeps top-of-module deps clean
+        from .fetch_guard import assert_safe_fetch_url, UnsafeFetchURLError
+
+        current = url
         async with _httpx.AsyncClient(
             timeout=timeout,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={
                 "User-Agent": USER_AGENT,
                 "Accept": "text/html,application/xhtml+xml",
             },
         ) as client:
-            resp = await client.get(url)
-            ct = (resp.headers.get("content-type") or "").lower()
-            if resp.status_code != 200 or "html" not in ct:
-                return ""
-            return resp.text
+            for _hop in range(max_redirects + 1):
+                try:
+                    assert_safe_fetch_url(current)
+                except UnsafeFetchURLError as e:
+                    logger.warning(f"[tradecraft] crawl blocked SSRF url={current}: {e}")
+                    return ""
+                resp = await client.get(current)
+                if resp.is_redirect:
+                    loc = resp.headers.get("location")
+                    if not loc:
+                        return ""
+                    current = str(resp.url.join(loc))
+                    continue
+                ct = (resp.headers.get("content-type") or "").lower()
+                if resp.status_code != 200 or "html" not in ct:
+                    return ""
+                return resp.text
+            logger.warning(f"[tradecraft] crawl too many redirects for url={url}")
+            return ""
     except Exception as e:
         logger.debug(f"[tradecraft] crawl http fetch error url={url} err={e}")
         return ""
@@ -145,6 +167,14 @@ async def _crawl_fetch(url: str, mcp_manager, *, tier1_threshold_bytes: int = 40
     800-byte default for tradecraft fetches because crawl pages need many
     visible links, not just any content.
     """
+    # STRIDE I18: refuse an unsafe seed/frontier URL before EITHER fetcher runs,
+    # so a blocked HTTP fetch can't fall through to the Playwright (sandbox) path
+    # and reach the same internal address.
+    from .fetch_guard import is_safe_fetch_url
+    if not is_safe_fetch_url(url):
+        logger.warning(f"[tradecraft] crawl skipping unsafe url={url}")
+        return "", 0
+
     html = await _http_fetch(url)
     if html and len(html) >= tier1_threshold_bytes:
         return html, 1

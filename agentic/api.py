@@ -30,6 +30,7 @@ from pydantic import BaseModel
 from logging_config import setup_logging
 from orchestrator import AgentOrchestrator
 from orchestrator_helpers import normalize_content
+from prompt_safety import wrap_untrusted, UNTRUSTED_OUTPUT_GUIDANCE
 from startup_guard import check_single_worker
 from utils import get_session_count
 from websocket_api import WebSocketManager, websocket_endpoint, MessageType
@@ -557,15 +558,16 @@ async def llm_ffuf_extensions(body: FfufExtensionsRequest):
         logger.error(f"ffuf-extensions: cannot set up LLM: {e}")
         return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
 
+    # STRIDE T20: response headers are target-controlled; frame them.
     user_msg = (
         f"URL: {body.url}\n"
-        f"Headers: {json_mod.dumps(body.headers)}\n"
+        f"Headers: {wrap_untrusted(json_mod.dumps(body.headers), label='TARGET_HEADERS')}\n"
         f"Suggest up to {body.max_extensions} extensions."
     )
 
     try:
         response = await llm.ainvoke([
-            SystemMessage(content=_FFUF_EXT_SYSTEM_PROMPT),
+            SystemMessage(content=_FFUF_EXT_SYSTEM_PROMPT + "\n\n" + UNTRUSTED_OUTPUT_GUIDANCE),
             HumanMessage(content=user_msg),
         ])
     except Exception as e:
@@ -655,9 +657,12 @@ async def llm_nuclei_tags(body: NucleiTagsRequest):
         logger.error(f"nuclei-tags: cannot set up LLM: {e}")
         return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
 
+    # STRIDE T20: detected technologies/servers are derived from target
+    # fingerprints (attacker-influenced); frame them. current_tags/candidates
+    # are tool-supplied control values and stay plain.
     user_msg = (
-        f"Detected technologies: {json_mod.dumps(body.technologies)}\n"
-        f"Detected servers: {json_mod.dumps(body.servers)}\n"
+        f"Detected technologies: {wrap_untrusted(json_mod.dumps(body.technologies), label='TARGET_FINGERPRINT')}\n"
+        f"Detected servers: {wrap_untrusted(json_mod.dumps(body.servers), label='TARGET_FINGERPRINT')}\n"
         f"User's current tags: {json_mod.dumps(body.current_tags)}\n"
         f"Candidates (pick only from these): {json_mod.dumps(body.candidates)}\n"
         f"Pick up to {body.max_tags} tags."
@@ -665,7 +670,7 @@ async def llm_nuclei_tags(body: NucleiTagsRequest):
 
     try:
         response = await llm.ainvoke([
-            SystemMessage(content=_NUCLEI_TAGS_SYSTEM_PROMPT),
+            SystemMessage(content=_NUCLEI_TAGS_SYSTEM_PROMPT + "\n\n" + UNTRUSTED_OUTPUT_GUIDANCE),
             HumanMessage(content=user_msg),
         ])
     except Exception as e:
@@ -764,17 +769,20 @@ async def llm_waf_classify(body: WafClassifyRequest):
         logger.error(f"waf-classify: cannot set up LLM: {e}")
         return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
 
+    # STRIDE T20: headers + body are attacker-controlled target response data;
+    # frame them in a nonce boundary so the helper LLM treats them as data, not
+    # instructions.
     user_msg = (
         f"URL: {body.url}\n"
         f"Status: {body.status_code}\n"
         f"Response time (ms): {body.response_time_ms}\n"
-        f"Headers: {json_mod.dumps(body.headers)}\n"
-        f"Body sample (first 4KB):\n{body.body_sample}"
+        f"Headers: {wrap_untrusted(json_mod.dumps(body.headers), label='TARGET_HEADERS')}\n"
+        f"Body sample (first 4KB):\n{wrap_untrusted(body.body_sample, label='TARGET_BODY')}"
     )
 
     try:
         response = await llm.ainvoke([
-            SystemMessage(content=_WAF_CLASSIFY_SYSTEM_PROMPT),
+            SystemMessage(content=_WAF_CLASSIFY_SYSTEM_PROMPT + "\n\n" + UNTRUSTED_OUTPUT_GUIDANCE),
             HumanMessage(content=user_msg),
         ])
     except Exception as e:
@@ -889,16 +897,17 @@ async def llm_nuclei_fp_filter(body: NucleiFpFilterRequest):
         logger.error(f"nuclei-fp-filter: cannot set up LLM: {e}")
         return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
 
+    # STRIDE T20: status line + response body are attacker-controlled target data.
     user_msg = (
         f"Template: {body.template_id}\n"
         f"Tags: {json_mod.dumps(body.tags)}\n"
-        f"Status: {body.status_line}\n"
-        f"Response sample (first 4KB):\n{body.response_sample}"
+        f"Status: {wrap_untrusted(body.status_line, label='TARGET_STATUS')}\n"
+        f"Response sample (first 4KB):\n{wrap_untrusted(body.response_sample, label='TARGET_BODY')}"
     )
 
     try:
         response = await llm.ainvoke([
-            SystemMessage(content=_NUCLEI_FP_FILTER_SYSTEM_PROMPT),
+            SystemMessage(content=_NUCLEI_FP_FILTER_SYSTEM_PROMPT + "\n\n" + UNTRUSTED_OUTPUT_GUIDANCE),
             HumanMessage(content=user_msg),
         ])
     except Exception as e:
@@ -1021,17 +1030,18 @@ async def llm_takeover_classify(body: TakeoverClassifyRequest):
         logger.error(f"takeover-classify: cannot set up LLM: {e}")
         return JSONResponse(content={"error": f"LLM not configured: {e}"}, status_code=503)
 
+    # STRIDE T20: headers + response body are attacker-controlled target data.
     user_msg = (
         f"Hostname: {body.hostname}\n"
         f"Claimed provider: {body.expected_provider}\n"
         f"Status: {body.status_code}\n"
-        f"Headers: {json_mod.dumps(body.headers)}\n"
-        f"Response sample (first 4KB):\n{body.response_sample}"
+        f"Headers: {wrap_untrusted(json_mod.dumps(body.headers), label='TARGET_HEADERS')}\n"
+        f"Response sample (first 4KB):\n{wrap_untrusted(body.response_sample, label='TARGET_BODY')}"
     )
 
     try:
         response = await llm.ainvoke([
-            SystemMessage(content=_TAKEOVER_CLASSIFY_SYSTEM_PROMPT),
+            SystemMessage(content=_TAKEOVER_CLASSIFY_SYSTEM_PROMPT + "\n\n" + UNTRUSTED_OUTPUT_GUIDANCE),
             HumanMessage(content=user_msg),
         ])
     except Exception as e:
@@ -1072,6 +1082,27 @@ async def emergency_stop_all():
         return JSONResponse(content={"stopped": 0}, status_code=503)
     stopped = await ws_manager.stop_all()
     logger.warning(f"Emergency stop: cancelled {stopped} agent task(s)")
+    return {"stopped": stopped}
+
+
+class SessionStopRequest(BaseModel):
+    user_id: str
+    project_id: str
+    session_id: str
+
+
+@app.post("/agent-session/stop", tags=["Sessions"])
+async def stop_agent_session(body: SessionStopRequest):
+    """Cancel the running agent task for ONE session (by user/project/session).
+
+    Called when a conversation is deleted so its agent loop stops instead of
+    continuing to run headlessly and re-seeding the Neo4j attack-chain graph.
+    """
+    if not ws_manager:
+        return JSONResponse(content={"stopped": False}, status_code=503)
+    session_key = f"{body.user_id}:{body.project_id}:{body.session_id}"
+    stopped = await ws_manager.stop_session(session_key)
+    logger.info(f"Agent session stop requested for {session_key}: cancelled={stopped}")
     return {"stopped": stopped}
 
 

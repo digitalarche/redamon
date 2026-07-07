@@ -127,6 +127,11 @@ class InitMessage(BaseModel):
     project_id: str
     session_id: str
     graph_view_cypher: Optional[str] = None
+    # STRIDE S6: short-lived HS256 ticket minted by the webapp, binding the
+    # operator's authenticated identity to (user_id, project_id, session_id).
+    # Verified by the agent before the session is registered. Optional so that
+    # dev stacks without AGENT_WS_TICKET_SECRET still connect (fail-open).
+    ticket: Optional[str] = None
 
 
 class QueryMessage(BaseModel):
@@ -301,9 +306,16 @@ class WebSocketManager:
         connection: WebSocketConnection,
         user_id: str,
         project_id: str,
-        session_id: str
+        session_id: str,
+        verified: bool = False
     ):
-        """Authenticate and register connection"""
+        """Authenticate and register connection.
+
+        `verified` is True only when the caller presented a cryptographically
+        valid WS ticket (S6). An UNVERIFIED peer may open a brand-new session
+        (subject to the memory cap) but must NEVER seize or evict an existing
+        one — that is exactly the S6 task-hijack + operator-eviction vector.
+        """
         async with self.lock:
             connection.user_id = user_id
             connection.project_id = project_id
@@ -313,12 +325,13 @@ class WebSocketManager:
             # authenticated=True is set below) so the cap check + registration use
             # the real key, not None.
             session_key = f"{user_id}:{project_id}:{session_id}"
+            collision = session_key in self.active_connections
 
             # Memory governor (Part 3): cap concurrent NEW sessions to available
             # RAM (none existed before). Reconnects to an existing key are always
             # allowed. On rejection we close the socket and leave authenticated
             # False, so the caller's existing `if not authenticated` guard applies.
-            if session_key not in self.active_connections:
+            if not collision:
                 cap = _governed_max_sessions()
                 if cap is not None and len(self.active_connections) >= cap:
                     logger.warning(f"session cap reached ({len(self.active_connections)}/{cap}); "
@@ -330,10 +343,25 @@ class WebSocketManager:
                         pass
                     return
 
+            # STRIDE S6: refuse to take over a live session from an unverified
+            # peer. The existing operator keeps the socket and the running task;
+            # the impersonating connection is closed. This holds even in the
+            # dev fail-open mode (no ticket secret), so the worst S6 outcome
+            # (hijack + eviction) is prevented regardless of secret config.
+            if collision and not verified:
+                logger.warning(
+                    f"rejecting unverified takeover of active session {session_key}")
+                try:
+                    await connection.websocket.close(
+                        code=1008, reason="Session in use; authentication required")
+                except Exception:
+                    pass
+                return
+
             connection.authenticated = True
 
-            # Transfer running task from old connection if reconnecting
-            if session_key in self.active_connections:
+            # Verified reconnect: transfer running task from the old connection.
+            if collision:
                 old_conn = self.active_connections[session_key]
                 # Transfer active task and state to the new connection
                 if old_conn._active_task and not old_conn._active_task.done():
@@ -347,7 +375,7 @@ class WebSocketManager:
                     logger.warning(f"Error closing old connection: {e}")
 
             self.active_connections[session_key] = connection
-            logger.info(f"Authenticated session: {session_key}")
+            logger.info(f"Authenticated session: {session_key} (verified={verified})")
 
     async def disconnect(self, connection: WebSocketConnection):
         """Remove connection from active connections (only if it's the SAME object)"""
@@ -411,14 +439,50 @@ class WebSocketManager:
                     except Exception:
                         pass
 
-                # Mark conversation as not running in DB
-                if conn and conn.session_id:
-                    try:
-                        await update_conversation(conn.session_id, {"agentRunning": False})
-                    except Exception:
-                        pass
+                    # Mark conversation as not running in DB
+                    if conn and conn.session_id:
+                        try:
+                            await update_conversation(conn.session_id, {"agentRunning": False})
+                        except Exception:
+                            pass
 
         return stopped
+
+    async def stop_session(self, session_key: str) -> bool:
+        """Cancel the running agent task for a SINGLE session key.
+
+        Used when its conversation is deleted so the backing agent loop halts
+        instead of continuing headlessly (and re-seeding the attack-chain graph
+        after the UI clears it). Also cancels any in-flight tool tasks for the
+        session and marks a connected socket stopped. Returns True if a live
+        task was cancelled.
+        """
+        cancelled = False
+        task = self._active_tasks.get(session_key)
+        if task and not task.done():
+            task.cancel()
+            cancelled = True
+        self._active_tasks.pop(session_key, None)
+
+        # Cancel any in-flight tool/wave tasks for this session (keys are
+        # "<session_key>|...", see _tool_task_key).
+        for k, t in list(self._tool_tasks.items()):
+            if k.startswith(f"{session_key}|") and t and not t.done():
+                t.cancel()
+                self._tool_tasks.pop(k, None)
+
+        conn = self.active_connections.get(session_key)
+        if conn:
+            conn._is_stopped = True
+            try:
+                await conn.send_message(MessageType.STOPPED, {
+                    "message": "Session stopped (conversation deleted)",
+                    "iteration": 0,
+                    "phase": "informational",
+                })
+            except Exception:
+                pass
+        return cancelled
 
 
 # =============================================================================
@@ -987,17 +1051,55 @@ class WebSocketHandler:
         try:
             init_msg = InitMessage(**payload)
 
+            # STRIDE S6: verify the webapp-minted ticket and bind the session to
+            # the cryptographically attested identity. When a ticket secret is
+            # configured, a missing/invalid/expired ticket is rejected outright.
+            # When it is unset (dev), fail open with a one-time warning and trust
+            # the self-asserted identity (but authenticate() still refuses any
+            # unverified takeover of an existing session).
+            from ws_ticket import ticket_secret, verify_ws_ticket, warn_ticket_failopen_once
+
+            secret = ticket_secret()
+            user_id = init_msg.user_id
+            project_id = init_msg.project_id
+            session_id = init_msg.session_id
+            verified = False
+
+            if secret:
+                claims = verify_ws_ticket(init_msg.ticket, secret)
+                if claims is None:
+                    logger.warning("Rejected /ws/agent init: missing or invalid ticket")
+                    await connection.send_message(MessageType.ERROR, {
+                        "message": "WebSocket authentication failed",
+                        "recoverable": False,
+                    })
+                    try:
+                        await connection.websocket.close(
+                            code=1008, reason="Invalid or missing ticket")
+                    except Exception:
+                        pass
+                    return
+                # Identity comes from the verified ticket, not the client body.
+                user_id = str(claims["sub"])
+                project_id = str(claims["pid"])
+                session_id = str(claims["sid"])
+                verified = True
+            else:
+                warn_ticket_failopen_once()
+
             # Authenticate connection
             await self.ws_manager.authenticate(
                 connection,
-                init_msg.user_id,
-                init_msg.project_id,
-                init_msg.session_id
+                user_id,
+                project_id,
+                session_id,
+                verified=verified,
             )
 
             # authenticate() rejects (and closes the socket) when the memory
-            # governor's session cap is hit, leaving authenticated False. Don't
-            # proceed to send CONNECTED on a closed/unauthenticated socket.
+            # governor's session cap is hit, or when an unverified peer tries to
+            # take over an active session (S6), leaving authenticated False.
+            # Don't proceed to send CONNECTED on a closed/unauthenticated socket.
             if not connection.authenticated:
                 return
 
@@ -1015,14 +1117,14 @@ class WebSocketHandler:
             except Exception:
                 pass
             await connection.send_message(MessageType.CONNECTED, {
-                "session_id": init_msg.session_id,
+                "session_id": session_id,
                 "message": "WebSocket connection established",
                 "timestamp": datetime.utcnow().isoformat(),
                 "protocol_version": 2,
                 "features": _features,
             })
 
-            logger.info(f"Session initialized: {init_msg.session_id}")
+            logger.info(f"Session initialized: {session_id}")
 
         except ValidationError as e:
             logger.error(f"Invalid init message: {e}")

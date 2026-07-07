@@ -104,6 +104,9 @@ model UserSettings {
   pdcpApiKey       String  @default("") @map("pdcp_api_key")
 
   // Tunneling & Infrastructure
+  // STRIDE I19: tunnels must be explicitly enabled by the operator; a saved
+  // credential no longer auto-activates (and does not auto-restore on restart).
+  tunnelsEnabled  Boolean  @default(false) @map("tunnels_enabled")
   ngrokAuthtoken  String   @default("") @map("ngrok_authtoken")
   chiselServerUrl String   @default("") @map("chisel_server_url")
   chiselAuth      String   @default("") @map("chisel_auth")

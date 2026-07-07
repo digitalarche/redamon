@@ -503,7 +503,11 @@ def build_attack_path_behavior(attack_path_type):
         return (
             "No mandatory workflow — use available tools based on the attack technique.\n"
             "In informational phase: Gather relevant target info, then request transition to exploitation.\n"
-            "In exploitation: Use the generic exploitation workflow provided."
+            "In exploitation: Use the generic exploitation workflow provided.\n"
+            "**Your skill is not yet specialized.** The moment the live target reveals a concrete "
+            "vulnerability class (XSS, SQLi, SSRF, RCE, path traversal, etc.), emit action='switch_skill' "
+            "with the matching to_skill to load that skill's specialized workflow. You do NOT need to "
+            "change phase to switch skills — do it as soon as the evidence is clear."
         )
     elif not attack_path_type:
         return ""  # Not yet classified
@@ -827,11 +831,12 @@ Based on the context above, decide your next action. You MUST output valid JSON:
 {{
     "thought": "Your analysis of the current situation and what needs to be done next",
     "reasoning": "Why you chose this specific action over alternatives",
-    "action": "<one of: use_tool, plan_tools, {fireteam_action_enum}transition_phase, complete, ask_user>",
+    "action": "<one of: use_tool, plan_tools, {fireteam_action_enum}transition_phase, switch_skill, complete, ask_user>",
     "tool_name": "<only if action=use_tool: {tool_name_enum}>",
     "tool_args": "<only if action=use_tool: {{'question': '...'}} or {{'args': '...'}} or {{'command': '...'}}",
     "tool_plan": "<only if action=plan_tools: see plan_tools example below>",{fireteam_plan_field}
     "phase_transition": "<only if action=transition_phase>",
+    "skill_switch": "<only if action=switch_skill: {{'to_skill': '...', 'reason': '...'}}>",
     "user_question": "<only if action=ask_user>",
     "completion_reason": "<only if action=complete>",
     "updated_todo_list": [
@@ -848,6 +853,12 @@ transition_phase:
 ```json
 {{"action": "transition_phase", "phase_transition": {{"to_phase": "exploitation", "reason": "...", "planned_actions": ["..."], "risks": ["..."]}}, ...}}
 ```
+
+switch_skill (rebind your attack skill the moment recon reveals the vulnerability class — this loads that skill's specialized workflow and does NOT require a phase change):
+```json
+{{"action": "switch_skill", "skill_switch": {{"to_skill": "xss", "reason": "The /page name parameter is evaluated as JavaScript inside alert() — this is a reflected XSS target"}}, ...}}
+```
+Valid to_skill values are the enabled attack skills (e.g. xss, sql_injection, ssrf, rce, path_traversal), a 'user_skill:<id>', or a '<term>-unclassified' fallback. Switch as soon as the evidence is clear; do not wait for the exploitation phase.
 
 ask_user:
 ```json

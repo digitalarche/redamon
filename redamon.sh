@@ -497,6 +497,21 @@ ensure_auth_secrets() {
         echo "MCP_AUTH_TOKEN=$(openssl rand -hex 32)" >> "$env_file"
         info "Generated MCP_AUTH_TOKEN"
     fi
+    # Dedicated secret the webapp uses to sign short-lived agent-WebSocket tickets
+    # and the agent verifies on the /ws/agent init frame (STRIDE S6). Kept SEPARATE
+    # from AUTH_SECRET so an agent compromise cannot forge login cookies. Stateless.
+    if ! grep -q '^AGENT_WS_TICKET_SECRET=' "$env_file" 2>/dev/null; then
+        echo "AGENT_WS_TICKET_SECRET=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated AGENT_WS_TICKET_SECRET"
+    fi
+    # Inbound token the tunnel-manager (:8015) validates on config pushes, and the
+    # webapp presents when pushing tunnel config (STRIDE I19/S14). Inbound-validation
+    # only (same category as MCP_AUTH_TOKEN), so the worker holding it does not
+    # violate the "worker holds no secrets" rule. Stateless.
+    if ! grep -q '^TUNNEL_AUTH_TOKEN=' "$env_file" 2>/dev/null; then
+        echo "TUNNEL_AUTH_TOKEN=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated TUNNEL_AUTH_TOKEN"
+    fi
 }
 
 # Compose project name (used to resolve the data-volume names). Must match
@@ -1266,6 +1281,15 @@ cmd_update() {
     # Export version for build arg
     export_version
 
+    # Generate auth/db secrets BEFORE recreating any container. A release may add
+    # new inbound secrets (e.g. AGENT_WS_TICKET_SECRET for S6, TUNNEL_AUTH_TOKEN
+    # for I19/S14); if the recreate below runs before they exist in .env, the
+    # containers start with empty values and those protections FAIL OPEN until the
+    # next recreate. Generating first guarantees a single `update` fully enforces.
+    # Both are idempotent (append-if-absent), so this is a no-op once present.
+    ensure_auth_secrets
+    ensure_db_secrets
+
     # Rebuild tool-profile images. A tool image is build-only (not a running core
     # service), so a failure here must NOT abort the rest of the update (core
     # services, broker, auth key). Warn and continue; the existing tool image keeps
@@ -1334,9 +1358,8 @@ cmd_update() {
     echo -e "  ${CYAN}Webapp:${NC}  http://localhost:3000"
     echo ""
 
-    # Ensure auth secrets exist (first update after auth feature is added)
-    ensure_auth_secrets
-    ensure_db_secrets
+    # Auth/db secrets are generated earlier (before the container recreate) so
+    # newly-added inbound secrets take effect on this same update — see above.
 
     # Ensure an admin user exists (prompts if none found)
     ensure_admin

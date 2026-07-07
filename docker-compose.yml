@@ -537,6 +537,10 @@ services:
       # CHECKS, so holding it does not violate the "worker holds no secrets" rule.
       # When empty (dev / not generated) the servers fail-open with a warning.
       MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      # INBOUND token the tunnel-manager (:8015) validates on config pushes
+      # (STRIDE I19/S14). Same inbound-validation category as MCP_AUTH_TOKEN, so
+      # it does not violate the "worker holds no secrets" rule. Fail-open if unset.
+      TUNNEL_AUTH_TOKEN: "${TUNNEL_AUTH_TOKEN:-}"
       # Webapp API for fetching tunnel config from Global Settings on boot
       WEBAPP_API_URL: http://webapp:3000
       # NOTE: INTERNAL_API_KEY is intentionally NOT passed to the worker. The
@@ -597,6 +601,10 @@ services:
       # the Kali servers can authenticate the agent (STRIDE S10). Must match the
       # kali-sandbox MCP_AUTH_TOKEN. Empty in dev → no header, servers fail-open.
       MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      # Secret used to verify short-lived agent-WebSocket tickets on the /ws/agent
+      # init frame (STRIDE S6). Must match the webapp's AGENT_WS_TICKET_SECRET.
+      # Empty in dev → agent fails open (accepts init without a ticket).
+      AGENT_WS_TICKET_SECRET: "${AGENT_WS_TICKET_SECRET:-}"
       # Webapp API (internal docker network)
       WEBAPP_API_URL: http://webapp:3000
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
@@ -746,6 +754,13 @@ services:
       # Auth
       AUTH_SECRET: ${AUTH_SECRET:-changeme}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
+      # Signs short-lived agent-WebSocket tickets the agent verifies (STRIDE S6).
+      # Dedicated secret (NOT AUTH_SECRET) so agent-side exposure can't forge
+      # login cookies. Empty in dev → no ticket minted, agent fails open.
+      AGENT_WS_TICKET_SECRET: "${AGENT_WS_TICKET_SECRET:-}"
+      # Bearer token the webapp presents when pushing tunnel config to the
+      # worker's tunnel-manager :8015 (STRIDE I19/S14). Empty in dev → no header.
+      TUNNEL_AUTH_TOKEN: "${TUNNEL_AUTH_TOKEN:-}"
       # Backend services (server-side API routes → internal docker network)
       RECON_ORCHESTRATOR_URL: http://recon-orchestrator:8010
       # Sent as X-Orchestrator-Key on every orchestrator call (server-side only).

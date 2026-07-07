@@ -1,11 +1,10 @@
 /**
- * Unit tests for the tunnel-config sync trigger route.
+ * Unit tests for the tunnel-config sync trigger route (STRIDE I19).
  *
- * The worker calls POST /api/global/tunnel-config/sync (unauthenticated) on boot;
- * the webapp reads the saved tunnel config from the DB and PUSHES it to the
- * worker's tunnel-manager. The worker never pulls secrets itself (see V8 + the
- * 5.1.0 tunnel fix). prisma and global fetch are mocked so the handler runs with
- * no DB and no network.
+ * On worker boot this route must FORCE tunnels down (clear tunnelsEnabled + push
+ * an empty/stop config) so a restart never silently re-exposes internal
+ * listeners to the internet. It presents TUNNEL_AUTH_TOKEN when set. prisma +
+ * global fetch are mocked.
  *
  * Run: npx vitest run "src/app/api/global/tunnel-config/sync/route.test.ts"
  *
@@ -13,12 +12,12 @@
  */
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 
-const mockFindFirst = vi.fn()
+const mockUpdateMany = vi.fn()
 
 vi.mock('@/lib/prisma', () => ({
   default: {
     userSettings: {
-      findFirst: (...args: unknown[]) => mockFindFirst(...args),
+      updateMany: (...args: unknown[]) => mockUpdateMany(...args),
     },
   },
 }))
@@ -28,7 +27,8 @@ import { POST } from './route'
 const WORKER_URL = 'http://kali-sandbox:8015/tunnel/configure'
 
 beforeEach(() => {
-  mockFindFirst.mockReset()
+  mockUpdateMany.mockReset().mockResolvedValue({ count: 0 })
+  delete process.env.TUNNEL_AUTH_TOKEN
 })
 
 afterEach(() => {
@@ -36,19 +36,23 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('POST /api/global/tunnel-config/sync', () => {
-  test('no saved config: pushes an EMPTY config to the worker, reports configured:false', async () => {
-    mockFindFirst.mockResolvedValue(null)
+describe('POST /api/global/tunnel-config/sync — I19', () => {
+  test('forces tunnels down: clears tunnelsEnabled and pushes an EMPTY config', async () => {
     const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
     const res = await POST()
     expect(await res.json()).toEqual({ ok: true, configured: false })
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    // Disabled every enabled row.
+    expect(mockUpdateMany).toHaveBeenCalledWith({
+      where: { tunnelsEnabled: true },
+      data: { tunnelsEnabled: false },
+    })
+
+    // Pushed a stop (empty) config — never re-activates on boot.
     const [url, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(WORKER_URL)
-    expect(opts.method).toBe('POST')
     expect(JSON.parse(opts.body as string)).toEqual({
       ngrokAuthtoken: '',
       chiselServerUrl: '',
@@ -56,47 +60,31 @@ describe('POST /api/global/tunnel-config/sync', () => {
     })
   })
 
-  test('saved config: PUSHES the stored values to the worker, reports configured:true', async () => {
-    mockFindFirst.mockResolvedValue({
-      ngrokAuthtoken: 'tok',
-      chiselServerUrl: 'http://chisel.example',
-      chiselAuth: 'pw',
-    })
+  test('presents the TUNNEL_AUTH_TOKEN when set', async () => {
+    process.env.TUNNEL_AUTH_TOKEN = 'tok-123'
     const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
-    const res = await POST()
-    expect(await res.json()).toEqual({ ok: true, configured: true })
-
+    await POST()
     const [, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
-    expect(JSON.parse(opts.body as string)).toEqual({
-      ngrokAuthtoken: 'tok',
-      chiselServerUrl: 'http://chisel.example',
-      chiselAuth: 'pw',
-    })
+    expect((opts.headers as Record<string, string>)['Authorization']).toBe('Bearer tok-123')
   })
 
-  test('worker push failure is swallowed: returns ok:false, HTTP 200, no throw', async () => {
-    mockFindFirst.mockResolvedValue(null)
+  test('omits the auth header when the token is unset (dev fail-open)', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    await POST()
+    const [, opts] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect((opts.headers as Record<string, string>)['Authorization']).toBeUndefined()
+  })
+
+  test('worker push failure is swallowed: returns ok:false, HTTP 200', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')))
 
     const res = await POST()
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: false })
-  })
-
-  test('SECURITY: the HTTP response never contains the secret values', async () => {
-    mockFindFirst.mockResolvedValue({
-      ngrokAuthtoken: 'SUPER_SECRET_TOKEN',
-      chiselServerUrl: 'http://x',
-      chiselAuth: 'SECRET_AUTH',
-    })
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 200 })))
-
-    const res = await POST()
-    const text = await res.text()
-    expect(text).not.toContain('SUPER_SECRET_TOKEN')
-    expect(text).not.toContain('SECRET_AUTH')
   })
 })

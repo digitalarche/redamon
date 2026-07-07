@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { getSession, isInternalRequest } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -21,17 +22,38 @@ function maskProvider(provider: Record<string, unknown>): Record<string, unknown
 }
 
 // GET /api/users/[id]/llm-providers
+//
+// STRIDE I1: unmasked provider secrets (apiKey / awsSecretKey / awsBearerToken)
+// are returned ONLY to trusted internal callers that present a valid
+// `X-Internal-Key` header (the agent) — never on the strength of the plaintext
+// `?internal=true` query param alone. Browser/JWT callers always receive masked
+// rows, and only for their OWN user id (or if admin), closing the cross-tenant
+// IDOR where any logged-in user could read another user's cleartext keys.
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
-    const internal = request.nextUrl.searchParams.get('internal') === 'true'
+    const internalReq = isInternalRequest(request)
+    const wantUnmasked = request.nextUrl.searchParams.get('internal') === 'true'
+
+    // Browser/JWT callers must own the account (or be admin); they never get
+    // unmasked secrets even if they pass ?internal=true.
+    if (!internalReq) {
+      const session = await getSession()
+      if (!session) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      if (session.userId !== id && session.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
 
     const providers = await prisma.userLlmProvider.findMany({
       where: { userId: id },
       orderBy: { createdAt: 'asc' },
     })
 
-    if (internal) {
+    // Unmasked only for internal-key callers that explicitly request it.
+    if (internalReq && wantUnmasked) {
       return NextResponse.json(providers)
     }
 
@@ -49,6 +71,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    // Ownership: only the account owner (or admin), or a trusted internal
+    // caller, may create providers for this user id.
+    if (!isInternalRequest(request)) {
+      const session = await getSession()
+      if (!session) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      if (session.userId !== id && session.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
     const body = await request.json()
 
     const { providerType, name } = body

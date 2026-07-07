@@ -14,6 +14,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 
+try:
+    from recon.main_recon_modules.ip_filter import is_url_safe_to_probe
+except ImportError:  # spawned-container path where CWD is on sys.path
+    from ip_filter import is_url_safe_to_probe
+
 
 # Default paths to probe for source maps
 DEFAULT_SOURCEMAP_PROBE_PATHS = [
@@ -107,6 +112,11 @@ def _fetch_sourcemap(url: str, timeout: int = 10) -> Optional[dict]:
             return json.loads(content)
         except Exception:
             return None
+
+    # STRIDE I14: source-map URLs are derived from target JS; refuse to fetch
+    # ones that resolve to cloud metadata / loopback / an internal host.
+    if not is_url_safe_to_probe(url):
+        return None
 
     headers = {'User-Agent': 'Mozilla/5.0'}
     head_timeout = min(timeout, 5)

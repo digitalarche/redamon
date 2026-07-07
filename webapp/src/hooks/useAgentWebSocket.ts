@@ -111,14 +111,34 @@ export function useAgentWebSocket({
     wsRef.current.send(messageStr)
   }, [])
 
-  // Send initialization message
-  const sendInit = useCallback(() => {
+  // Send initialization message.
+  // STRIDE S6: fetch a short-lived ticket (JWT cookie sent automatically) and
+  // include it so the agent can authenticate the socket. If the mint fails or
+  // returns null (secret unset in dev), we send init without a ticket and the
+  // agent fails open.
+  const sendInit = useCallback(async () => {
     if (!wsRef.current || isAuthenticatedRef.current) return
+
+    let ticket: string | undefined
+    try {
+      const resp = await fetch('/api/agent/ws-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, sessionId }),
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        if (data?.ticket) ticket = data.ticket as string
+      }
+    } catch {
+      // Non-fatal: proceed without a ticket (agent fail-open when secret unset).
+    }
 
     const initPayload: InitPayload = {
       user_id: userId,
       project_id: projectId,
       session_id: sessionId,
+      ...(ticket && { ticket }),
       ...(graphViewCypher && { graph_view_cypher: graphViewCypher }),
     }
 

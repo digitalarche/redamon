@@ -21,7 +21,7 @@
 
 <p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v5.3.2-release-2E8B57?style=flat" alt="Version 5.3.2"/>
+  <img height="24" src="https://img.shields.io/badge/v5.3.3-release-2E8B57?style=flat" alt="Version 5.3.3"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
@@ -272,7 +272,7 @@ Tool images are built automatically on first run if they don't exist yet. The de
 | What changed | Action needed |
 |-------------|---------------|
 | `webapp/src/` (frontend code) | Nothing -- Next.js hot-reload handles it in dev mode |
-| `agentic/*.py` (agent Python code) | `docker compose restart agent` |
+| `agentic/*.py` (agent Python code) | `docker compose build agent && docker compose up -d agent` (source is baked into the image, so `restart` alone won't pick up `.py` changes) |
 | `recon_orchestrator/*.py` | `docker compose restart recon-orchestrator` |
 | `mcp/servers/*.py` (MCP servers) | `docker compose restart kali-sandbox` |
 | `agentic/Dockerfile` or `agentic/requirements.txt` | `docker compose build agent && docker compose up -d agent` |

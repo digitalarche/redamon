@@ -143,28 +143,42 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // STRIDE I19: tunnelsEnabled is a Boolean, so it can't ride the string
+    // `data`/`fields` loop above — handle it separately.
+    const enabledProvided = 'tunnelsEnabled' in body
+    const desiredEnabled = enabledProvided
+      ? Boolean(body.tunnelsEnabled)
+      : (existing?.tunnelsEnabled ?? false)
+
     const settings = await prisma.userSettings.upsert({
       where: { userId: id },
-      update: data,
-      create: { userId: id, ...data },
+      update: { ...data, ...(enabledProvided ? { tunnelsEnabled: desiredEnabled } : {}) },
+      create: { userId: id, ...data, tunnelsEnabled: desiredEnabled },
     })
 
-    // Push tunnel config to kali-sandbox if any tunnel field actually changed.
-    // A field "changed" if: (a) it's in the request body, AND (b) the new value
-    // written to `data[f]` differs from the previous DB value in `existing[f]`.
-    // Note: masked values (••••) are resolved to existing values above, so
-    // unchanged masked fields correctly compare as equal here.
-    const tunnelChanged = TUNNEL_FIELDS.some(f => f in body && data[f] !== (existing?.[f] ?? ''))
-    if (tunnelChanged) {
-      try {
-        await fetch('http://kali-sandbox:8015/tunnel/configure', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+    // Push tunnel config to kali-sandbox when the enabled state OR a tunnel
+    // credential changed. STRIDE I19: tunnels activate ONLY when the operator has
+    // explicitly enabled them; otherwise we push an empty (stop) config so a
+    // credential edit alone can never bring a tunnel up. The request carries the
+    // TUNNEL_AUTH_TOKEN so a rogue container can't drive :8015 (S14).
+    const credChanged = TUNNEL_FIELDS.some(f => f in body && data[f] !== (existing?.[f] ?? ''))
+    const enabledChanged = enabledProvided && desiredEnabled !== (existing?.tunnelsEnabled ?? false)
+    if (credChanged || enabledChanged) {
+      const config = settings.tunnelsEnabled
+        ? {
             ngrokAuthtoken: settings.ngrokAuthtoken,
             chiselServerUrl: settings.chiselServerUrl,
             chiselAuth: settings.chiselAuth,
-          }),
+          }
+        : { ngrokAuthtoken: '', chiselServerUrl: '', chiselAuth: '' }
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const token = process.env.TUNNEL_AUTH_TOKEN
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      try {
+        await fetch('http://kali-sandbox:8015/tunnel/configure', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(config),
         })
       } catch (e) {
         console.warn('Failed to push tunnel config to kali-sandbox:', e)

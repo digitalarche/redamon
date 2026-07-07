@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.3] - 2026-07-07
+
+### Security
+
+- **STRIDE hardening pass across the agent, recon, webapp, and tunnel surfaces.** SSRF egress guards reject loopback / RFC-1918 / link-local / cloud-metadata / CGNAT destinations on tradecraft-crawl fetches and redirects ([agentic/orchestrator_helpers/fetch_guard.py](agentic/orchestrator_helpers/fetch_guard.py), **I18**) and on URLs probed from a target's JavaScript ([recon/main_recon_modules/ip_filter.py](recon/main_recon_modules/ip_filter.py), **I14**). The agent WebSocket now requires a short-lived HS256 ticket that binds operator identity to `(projectId, sessionId)`, signed with a dedicated secret ([agentic/ws_ticket.py](agentic/ws_ticket.py), [webapp/src/lib/auth.ts](webapp/src/lib/auth.ts), **S6**). Tunnels activate only when explicitly enabled by the operator, and `/tunnel/configure` calls to kali-sandbox carry `TUNNEL_AUTH_TOKEN` so a rogue container can't drive `:8015` ([webapp/src/app/api/users/[id]/settings/route.ts](webapp/src/app/api/users/[id]/settings/route.ts), [mcp/servers/tunnel_manager.py](mcp/servers/tunnel_manager.py), **I19**/**S14**). Covered by new SSRF, ws-ticket, tunnel-gating, session-stop, and skill-switch tests, aggregated by [tests/run_security_remediation_suite.sh](tests/run_security_remediation_suite.sh).
+
+---
+
 ## [5.3.2] - 2026-07-06
 
 ### Fixed

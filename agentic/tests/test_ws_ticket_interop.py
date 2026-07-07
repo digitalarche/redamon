@@ -1,0 +1,64 @@
+"""
+STRIDE S6 — cross-runtime integration: a ticket minted by the webapp (jose,
+HS256) MUST verify with the agent's stdlib verifier, and MUST be rejected under
+the wrong secret. This guards the seam that unit tests (which sign with Python
+hmac) can't: a format disagreement between jose and the Python verifier would
+silently fail S6 open in production.
+
+Runs the real `jose` SignJWT inside the webapp container, then verifies the exact
+token string here. SKIPs cleanly if the webapp container / docker is unavailable.
+
+Run: python3 agentic/tests/test_ws_ticket_interop.py
+"""
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+_AGENTIC_DIR = str(Path(__file__).resolve().parents[1])
+if _AGENTIC_DIR not in sys.path:
+    sys.path.insert(0, _AGENTIC_DIR)
+
+from ws_ticket import verify_ws_ticket  # noqa: E402
+
+SECRET = "interop-secret-0123456789abcdef"
+
+_NODE_MINT = (
+    'const {SignJWT}=require("jose");'
+    '(async()=>{const k=new TextEncoder().encode(process.argv[1]);'
+    'const t=await new SignJWT({sub:"u1",pid:"p1",sid:"s1"})'
+    '.setProtectedHeader({alg:"HS256"}).setIssuedAt().setExpirationTime("60s").sign(k);'
+    'process.stdout.write(t);})();'
+)
+
+
+def _mint_with_jose(secret: str) -> str | None:
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "exec", "-T", "webapp", "node", "-e", _NODE_MINT, secret],
+            cwd=str(Path(_AGENTIC_DIR).parent),
+            capture_output=True, text=True, timeout=60,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    tok = (out.stdout or "").strip()
+    return tok if tok.count(".") == 2 else None
+
+
+class TicketInterop(unittest.TestCase):
+    def setUp(self):
+        self.token = _mint_with_jose(SECRET)
+        if not self.token:
+            self.skipTest("webapp container / jose unavailable")
+
+    def test_jose_ticket_verifies_in_python(self):
+        claims = verify_ws_ticket(self.token, SECRET)
+        self.assertIsNotNone(claims, "jose-minted ticket rejected by Python verifier (interop bug)")
+        self.assertEqual((claims["sub"], claims["pid"], claims["sid"]), ("u1", "p1", "s1"))
+
+    def test_wrong_secret_rejected(self):
+        self.assertIsNone(verify_ws_ticket(self.token, "the-wrong-secret"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

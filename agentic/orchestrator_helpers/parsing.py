@@ -131,6 +131,10 @@ def try_parse_llm_decision(response_text: str) -> Tuple[Optional[LLMDecision], O
         if "phase_transition" in data and (not data["phase_transition"] or data["phase_transition"] == {}):
             data["phase_transition"] = None
 
+        # Remove empty skill_switch object
+        if "skill_switch" in data and (not data["skill_switch"] or data["skill_switch"] == {}):
+            data["skill_switch"] = None
+
         # Handle empty output_analysis object
         if "output_analysis" in data and (not data["output_analysis"] or data["output_analysis"] == {}):
             data["output_analysis"] = None
@@ -162,6 +166,12 @@ def try_parse_llm_decision(response_text: str) -> Tuple[Optional[LLMDecision], O
                     data["fireteam_plan"] = None
                 else:
                     plan["members"] = valid_members
+
+        # NOTE: action=switch_skill with a missing/empty skill_switch is left
+        # as-is. skill_switch is Optional so model_validate still succeeds
+        # (skill_switch=None); the think_node dispatch branch handles None by
+        # rejecting with feedback and looping back to think — which keeps the
+        # agent alive rather than dropping it into the fallback complete() path.
 
         # Validate tool_plan when action is plan_tools
         if data.get("action") == "plan_tools" and data.get("tool_plan"):

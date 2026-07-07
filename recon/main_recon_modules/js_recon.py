@@ -36,6 +36,36 @@ from recon.helpers.js_recon.framework import (
 )
 from recon.helpers.ai_signal_catalog import match_ai_sdk
 
+try:
+    from recon.main_recon_modules.ip_filter import is_url_safe_to_probe
+except ImportError:  # spawned-container path where CWD is on sys.path
+    from ip_filter import is_url_safe_to_probe
+
+
+def _safe_redirect_get(url, *, timeout, headers, max_redirects=5):
+    """GET that validates the SSRF guard on every hop (STRIDE I14).
+
+    Follows redirects manually (allow_redirects=False) so a target-hosted JS URL
+    that 3xx-redirects into cloud metadata / an internal host is refused, while
+    legitimate CDN redirects to public hosts still resolve. Returns the final
+    ``requests.Response`` or ``None`` if a hop is unsafe / exceeds the hop cap.
+    """
+    current = url
+    for _hop in range(max_redirects + 1):
+        if not is_url_safe_to_probe(current):
+            print(f"[!][JsRecon] {current} -- blocked (SSRF guard)")
+            return None
+        resp = requests.get(current, timeout=timeout, headers=headers, allow_redirects=False)
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get('Location') or resp.headers.get('location')
+            if not loc:
+                return None
+            current = urljoin(current, loc)
+            continue
+        return resp
+    print(f"[!][JsRecon] {url} -- too many redirects")
+    return None
+
 
 # File extensions to include as JS files
 _JS_EXTENSIONS = {'.js', '.mjs', '.jsx', '.ts', '.tsx'}
@@ -287,12 +317,15 @@ def _download_js_files(
     def fetch_one(idx_url):
         idx, url = idx_url
         try:
-            resp = requests.get(
+            # STRIDE I14: JS URLs are target-derived; validate every redirect hop
+            # (rather than disabling redirects, so legit CDN-hosted JS still loads).
+            resp = _safe_redirect_get(
                 url,
                 timeout=min(timeout // 10, 30),
                 headers={'User-Agent': 'Mozilla/5.0 (compatible; RedAmon/1.0)'},
-                allow_redirects=True,
             )
+            if resp is None:
+                return None
             if resp.status_code != 200:
                 print(f"[!][JsRecon] {url} -- HTTP {resp.status_code}")
                 return None
@@ -694,6 +727,15 @@ def _validate_extracted_endpoints(endpoints: list, settings: dict, request_func=
             return
 
         endpoint['resolved_url'] = resolved_url
+        # STRIDE I14: endpoints come from the target's JavaScript and are
+        # attacker-influenced. Refuse to probe URLs that resolve to cloud
+        # metadata / loopback / RFC-1918 / link-local — otherwise the recon
+        # container becomes an SSRF probe against internal services.
+        if not is_url_safe_to_probe(resolved_url):
+            endpoint['validation_status'] = 'unvalidated'
+            endpoint['validation_error'] = 'ssrf_blocked'
+            return
+
         probe_method = _endpoint_probe_method(method)
         headers = _endpoint_probe_headers(endpoint, resolved_url, custom_header_lines)
 

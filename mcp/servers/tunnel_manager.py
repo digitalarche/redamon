@@ -11,6 +11,7 @@ Endpoints:
   GET  /health            — simple health check
 """
 
+import hmac
 import json
 import os
 import signal
@@ -24,6 +25,15 @@ PORT = 8015
 _lock = threading.Lock()
 _ngrok_proc: subprocess.Popen | None = None
 _chisel_proc: subprocess.Popen | None = None
+
+# STRIDE I19/S14: inbound bearer token the webapp presents on config pushes.
+# Fail-open with a one-time warning when unset (dev), mirroring the MCP servers'
+# MCP_AUTH_TOKEN convention.
+_warned_failopen = False
+
+
+def _configured_token() -> str:
+    return os.environ.get("TUNNEL_AUTH_TOKEN", "") or ""
 
 
 def _kill_process(proc: subprocess.Popen | None, name: str) -> None:
@@ -69,7 +79,10 @@ def _start_chisel(server_url: str, auth: str) -> subprocess.Popen | None:
     cmd = ["chisel", "client"]
     if auth:
         cmd += ["--auth", auth]
-    cmd += [server_url, "R:4444:localhost:4444", "R:8080:localhost:8080"]
+    # STRIDE I19: only expose the reverse-shell handler port (4444). The former
+    # web-delivery reverse mapping on port 8080 published an internal HTTP
+    # listener to the internet with no reverse-shell justification and is dropped.
+    cmd += [server_url, "R:4444:localhost:4444"]
 
     print(f"[tunnel_manager] Starting chisel reverse tunnel to {server_url}...")
     proc = subprocess.Popen(
@@ -77,7 +90,7 @@ def _start_chisel(server_url: str, auth: str) -> subprocess.Popen | None:
         stdout=open("/var/log/chisel.log", "w"),
         stderr=subprocess.STDOUT,
     )
-    print(f"[tunnel_manager] chisel started (pid {proc.pid}, tunneling ports 4444 + 8080)")
+    print(f"[tunnel_manager] chisel started (pid {proc.pid}, tunneling port 4444)")
     return proc
 
 
@@ -133,16 +146,38 @@ class TunnelHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self) -> bool:
+        """Validate the inbound bearer token (constant-time). Fail-open when
+        TUNNEL_AUTH_TOKEN is unset, so dev/pre-generation stacks keep working."""
+        global _warned_failopen
+        expected = _configured_token()
+        if not expected:
+            if not _warned_failopen:
+                print("[tunnel_manager] TUNNEL_AUTH_TOKEN not set - accepting "
+                      "config without auth (fail-open; dev only)")
+                _warned_failopen = True
+            return True
+        header = self.headers.get("Authorization", "") or ""
+        presented = header[7:].strip() if header[:7].lower() == "bearer " else ""
+        return bool(presented) and hmac.compare_digest(presented, expected)
+
     def do_GET(self):
-        if self.path == "/tunnel/status":
-            self._send_json(get_status())
-        elif self.path == "/health":
+        if self.path == "/health":
+            # Unauthenticated on purpose: the container healthcheck curls this.
             self._send_json({"status": "ok"})
+        elif self.path == "/tunnel/status":
+            if not self._authorized():
+                self._send_json({"error": "unauthorized"}, 401)
+                return
+            self._send_json(get_status())
         else:
             self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
         if self.path == "/tunnel/configure":
+            if not self._authorized():
+                self._send_json({"error": "unauthorized"}, 401)
+                return
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             try:

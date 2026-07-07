@@ -33,9 +33,14 @@ TMP=$(mktemp -d); SCRIPT_DIR="$TMP"
 ensure_auth_secrets >/dev/null 2>&1
 assert_true  "MCP_AUTH_TOKEN generated (64 hex)" "grep -qE '^MCP_AUTH_TOKEN=[0-9a-f]{64}\$' '$TMP/.env'"
 assert_true  "AUTH_SECRET still generated"        "grep -qE '^AUTH_SECRET=[0-9a-f]{64}\$' '$TMP/.env'"
+# STRIDE S6 + I19: the WS-ticket signing secret and tunnel auth token.
+assert_true  "AGENT_WS_TICKET_SECRET generated (64 hex)" "grep -qE '^AGENT_WS_TICKET_SECRET=[0-9a-f]{64}\$' '$TMP/.env'"
+assert_true  "TUNNEL_AUTH_TOKEN generated (64 hex)"      "grep -qE '^TUNNEL_AUTH_TOKEN=[0-9a-f]{64}\$' '$TMP/.env'"
 # Idempotency: second call must not duplicate.
 ensure_auth_secrets >/dev/null 2>&1
 assert_eq    "MCP_AUTH_TOKEN not duplicated" "$(grep -c '^MCP_AUTH_TOKEN=' "$TMP/.env")" "1"
+assert_eq    "AGENT_WS_TICKET_SECRET not duplicated" "$(grep -c '^AGENT_WS_TICKET_SECRET=' "$TMP/.env")" "1"
+assert_eq    "TUNNEL_AUTH_TOKEN not duplicated" "$(grep -c '^TUNNEL_AUTH_TOKEN=' "$TMP/.env")" "1"
 rm -rf "$TMP"
 
 echo "== ensure_db_secrets: FRESH install (no data volume) =="
@@ -98,6 +103,20 @@ out="$(ensure_db_secrets 2>&1)"
 assert_true  "existing-volume detected via .env project name" "echo \"\$out\" | grep -q 'is unset and'"
 assert_false "no password regenerated against live DB"        "grep -q '^POSTGRES_PASSWORD=' '$TMP/.env'"
 unset -f docker; rm -rf "$TMP"
+
+echo "== cmd_update: secrets generated BEFORE container recreate (S6/I19 stay enforced) =="
+# Static ordering lock: within cmd_update(), ensure_auth_secrets must appear
+# before the container recreate. If it regresses, a first update onto a release
+# adding a new inbound secret would recreate containers with an empty value and
+# fail those protections open until the next recreate.
+SRC="$REPO_ROOT/redamon.sh"
+u_start=$(grep -n '^cmd_update()' "$SRC" | head -1 | cut -d: -f1)
+u_end=$(awk -v s="$u_start" 'NR>s && /^cmd_[a-z_]*\(\)/{print NR; exit}' "$SRC")
+sec_line=$(awk -v s="$u_start" -v e="$u_end" 'NR>s && NR<e && /ensure_auth_secrets/{print NR; exit}' "$SRC")
+rec_line=$(awk -v s="$u_start" -v e="$u_end" 'NR>s && NR<e && /docker compose up -d .*CORE_SERVICES/{print NR; exit}' "$SRC")
+assert_true "ensure_auth_secrets present in cmd_update" "[[ -n '$sec_line' ]]"
+assert_true "recreate present in cmd_update"            "[[ -n '$rec_line' ]]"
+assert_true "secrets generated before recreate ($sec_line < $rec_line)" "[[ '$sec_line' -lt '$rec_line' ]]"
 
 echo
 echo "-----------------------------------------"

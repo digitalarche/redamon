@@ -27,8 +27,15 @@ run "Unit: MCP bearer middleware (ASGI)"         python3 mcp/servers/tests/test_
 run "Unit: agent MCP client auth wiring"         python3 agentic/tests/test_system_mcp_auth.py
 run "Integration: SSE auth round-trip (real MCP)" python3 mcp/servers/tests/test_sse_auth_integration.py
 
+# S6/I14 host-runnable guard units (container-bound integration parts self-skip).
+# Full agent-side suites run via ./agentic/run_tests.sh; recon SSRF integration
+# runs in the recon image; webapp routes via `npx vitest run`.
+run "Unit: WS ticket verification (S6)"          python3 agentic/tests/test_ws_ticket_auth.py
+run "Unit: JS-recon SSRF URL guard (I14)"        python3 recon/tests/test_js_recon_ssrf.py
+
 # Security (skips if stack down)
 run "Security: reported exploit is blocked"      bash tests/test_exploit_blocked.sh
+run "Live E2E: S6 WS hijack + I1 + I19 tunnel"   bash tests/test_e2e_security_live.sh
 
 echo
 echo "============================================================"

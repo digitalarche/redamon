@@ -43,6 +43,7 @@ interface UserSettings {
   driftnetApiKey: string
   wpscanApiToken: string
   pdcpApiKey: string
+  tunnelsEnabled: boolean
   ngrokAuthtoken: string
   chiselServerUrl: string
   chiselAuth: string
@@ -74,6 +75,7 @@ const EMPTY_SETTINGS: UserSettings = {
   driftnetApiKey: '',
   wpscanApiToken: '',
   pdcpApiKey: '',
+  tunnelsEnabled: false,
   ngrokAuthtoken: '',
   chiselServerUrl: '',
   chiselAuth: '',
@@ -536,6 +538,7 @@ export default function SettingsPage() {
           driftnetApiKey: data.driftnetApiKey || '',
           wpscanApiToken: data.wpscanApiToken || '',
           pdcpApiKey: data.pdcpApiKey || '',
+          tunnelsEnabled: !!data.tunnelsEnabled,
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -628,6 +631,7 @@ export default function SettingsPage() {
           driftnetApiKey: data.driftnetApiKey || '',
           wpscanApiToken: data.wpscanApiToken || '',
           pdcpApiKey: data.pdcpApiKey || '',
+          tunnelsEnabled: !!data.tunnelsEnabled,
           ngrokAuthtoken: data.ngrokAuthtoken || '',
           chiselServerUrl: data.chiselServerUrl || '',
           chiselAuth: data.chiselAuth || '',
@@ -646,7 +650,7 @@ export default function SettingsPage() {
     }
   }, [userId, settings, rotationConfigs])
 
-  const updateSetting = useCallback(<K extends keyof UserSettings>(field: K, value: string) => {
+  const updateSetting = useCallback(<K extends keyof UserSettings>(field: K, value: UserSettings[K]) => {
     setSettings(prev => ({ ...prev, [field]: value }))
     setSettingsDirty(true)
   }, [])
@@ -1537,12 +1541,25 @@ export default function SettingsPage() {
           </h2>
         </div>
         <p className={styles.sectionHint}>
-          Configure reverse shell tunneling. Choose ngrok (free, single port) or chisel (multi-port, requires VPS). Changes apply immediately.
+          Configure reverse shell tunneling. Choose ngrok (free, single port) or chisel (requires VPS). Tunnels must be explicitly enabled below and are turned OFF automatically on restart — re-enable them each session (they expose an internet-reachable listener, breaking the LAN-only posture).
         </p>
         {settingsLoading ? (
           <div className={styles.emptyState}><Loader2 size={16} className={styles.spin} /> Loading...</div>
         ) : (
           <div className={styles.settingsGrid}>
+            <div className="formGroup">
+              <label className="formLabel" style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="checkbox"
+                  checked={settings.tunnelsEnabled}
+                  onChange={e => updateSetting('tunnelsEnabled', e.target.checked)}
+                />
+                <span>Enable tunnels</span>
+              </label>
+              <span className="formHint">
+                When off, saved credentials are stored but no tunnel is started. Enabling exposes port 4444 to the internet via ngrok/chisel.
+              </span>
+            </div>
             <SecretField
               label="ngrok Auth Token"
               hint="Enables ngrok TCP tunnel for reverse shells on port 4444. Stageless payloads only."
@@ -1562,7 +1579,7 @@ export default function SettingsPage() {
                 placeholder="e.g. http://your-vps.com:9090"
               />
               <span className="formHint">
-                Your VPS chisel server URL. Run on VPS: <code>chisel server -p 9090 --reverse</code>. Tunnels ports 4444 (handler) + 8080 (web delivery).
+                Your VPS chisel server URL. Run on VPS: <code>chisel server -p 9090 --reverse</code>. Tunnels port 4444 (reverse-shell handler).
               </span>
             </div>
             <SecretField

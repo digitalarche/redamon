@@ -4,11 +4,21 @@ import { useState, useEffect, useCallback } from 'react'
 
 const SESSION_STORAGE_KEY = 'redamon-session-id'
 
+// STRIDE S7: use a CSPRNG, not Math.random(), and widen the id to 128 bits so a
+// session id cannot be guessed/predicted (which, combined with S6, would allow
+// session-collision hijack). getRandomValues works in non-secure contexts
+// (plain http on the LAN), unlike crypto.randomUUID()/crypto.subtle.
 function generateSessionId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-  let code = ''
-  for (let i = 0; i < 8; i++) code += chars[Math.floor(Math.random() * chars.length)]
-  return `session_${code}`
+  const bytes = new Uint8Array(16) // 128 bits
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes)
+  } else {
+    // SSR / very old runtime fallback: still avoid a predictable stream.
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  let hex = ''
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+  return `session_${hex}`
 }
 
 export function useSession() {

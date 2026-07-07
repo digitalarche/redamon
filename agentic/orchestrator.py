@@ -1009,6 +1009,11 @@ class AgentOrchestrator:
                 return "deploy_fireteam"
             logger.warning("deploy_fireteam but no _current_fireteam_plan in state; falling back to think")
             return "think"
+        elif action == "switch_skill":
+            # think_node already applied (or rejected, with feedback) the skill
+            # switch and wrote any attack_path_type change into state. Loop back
+            # to think so the agent acts under the (possibly new) skill workflow.
+            return "think"
         elif action == "use_tool" and tool_name:
             return "execute_tool"
         else:

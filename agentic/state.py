@@ -59,6 +59,57 @@ def is_unclassified_path(attack_path_type: str) -> bool:
     return attack_path_type.endswith("-unclassified")
 
 
+def is_valid_attack_path_value(v: str) -> bool:
+    """True if v is a legal attack_path_type: a known builtin skill id,
+    a 'user_skill:<id>' reference, or a '<term>-unclassified' fallback.
+
+    Shared contract used by both the classifier (AttackPathClassification) and
+    the mid-run skill switch (SkillSwitchDecision) so both accept exactly the
+    same set of values.
+    """
+    return (
+        v in KNOWN_ATTACK_PATHS
+        or v.startswith("user_skill:")
+        or bool(_UNCLASSIFIED_RE.match(v))
+    )
+
+
+def evaluate_skill_switch(new_skill, current_skill, enabled_builtins, enabled_user_ids):
+    """Pure decision for a switch_skill action (action=switch_skill).
+
+    Kept side-effect-free so it can be unit-tested directly; the think_node
+    dispatch branch calls this and then applies the state/message/persistence
+    effects. Enforces the SAME enable contract the classifier uses: only an
+    ENABLED builtin skill, an ENABLED 'user_skill:<id>', or a '<term>-unclassified'
+    fallback may be switched to.
+
+    Args:
+        new_skill: requested target attack_path_type (may be None/empty).
+        current_skill: the currently-active attack_path_type.
+        enabled_builtins: set of enabled builtin skill ids.
+        enabled_user_ids: set of enabled user_skill ids (bare ids, no prefix).
+
+    Returns:
+        (outcome, resolved_skill) where outcome is one of:
+          "switched" — valid new skill different from current; resolved_skill set.
+          "noop"     — valid but equal to current; resolved_skill == current.
+          "rejected" — missing/disabled/invalid target; resolved_skill is None.
+    """
+    if not new_skill:
+        return ("rejected", None)
+    if new_skill.startswith("user_skill:"):
+        valid = new_skill.split(":", 1)[1] in (enabled_user_ids or set())
+    elif is_unclassified_path(new_skill):
+        valid = True
+    else:
+        valid = new_skill in (enabled_builtins or set())
+    if not valid:
+        return ("rejected", None)
+    if new_skill == current_skill:
+        return ("noop", new_skill)
+    return ("switched", new_skill)
+
+
 # =============================================================================
 # PYDANTIC MODELS FOR STRUCTURED DATA
 # =============================================================================
@@ -228,7 +279,7 @@ class ObjectiveOutcome(BaseModel):
 
 ActionType = Literal[
     "use_tool", "plan_tools", "transition_phase", "complete", "ask_user",
-    "deploy_fireteam",
+    "deploy_fireteam", "switch_skill",
 ]
 
 
@@ -247,6 +298,36 @@ class UserQuestionDecision(BaseModel):
     format: QuestionFormat = "text"
     options: List[str] = Field(default_factory=list)
     default_value: Optional[str] = None
+
+
+class SkillSwitchDecision(BaseModel):
+    """Attack-skill switch details from an LLM decision (action=switch_skill).
+
+    Lets the agent rebind attack_path_type mid-run — e.g. once recon reveals the
+    real vulnerability class — WITHOUT a phase change or a new objective. The
+    system prompt re-selects the skill workflow from attack_path_type on the next
+    think iteration, so switching to a skill whose gate tool is available in the
+    current phase (xss/ssrf/path_traversal via execute_curl; sql_injection/rce via
+    kali_shell) takes effect immediately, even in the informational phase.
+    """
+    to_skill: str = Field(
+        description="New attack_path_type: a known skill id (e.g. 'xss'), "
+                    "'user_skill:<id>', or '<term>-unclassified'"
+    )
+    reason: str = Field(
+        default="",
+        description="Why the skill is being switched — what live evidence revealed the class"
+    )
+
+    @field_validator("to_skill")
+    @classmethod
+    def _validate_to_skill(cls, v: str) -> str:
+        if is_valid_attack_path_value(v):
+            return v
+        raise ValueError(
+            f"to_skill must be a known attack path, 'user_skill:<id>', or "
+            f"'<term>-unclassified'. Got: '{v}'"
+        )
 
 
 class TodoItemUpdate(BaseModel):
@@ -606,6 +687,10 @@ class LLMDecision(BaseModel):
 
     # Phase transition fields (when action="transition_phase")
     phase_transition: Optional[PhaseTransitionDecision] = Field(default=None)
+
+    # Skill switch fields (when action="switch_skill") — rebind attack_path_type
+    # mid-run without changing phase or issuing a new objective.
+    skill_switch: Optional[SkillSwitchDecision] = Field(default=None)
 
     # Completion fields (when action="complete")
     completion_reason: Optional[str] = Field(default=None, description="Why task is complete")

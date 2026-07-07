@@ -20,6 +20,7 @@ from state import (
     format_todo_list,
     format_qa_history,
     format_objective_history,
+    evaluate_skill_switch,
     utc_now,
 )
 import orchestrator_helpers.chain_graph_writer as chain_graph
@@ -45,7 +46,7 @@ from orchestrator_helpers.productivity import (
     downgrade_verdict_to_no_progress,
     is_unproductive,
 )
-from project_settings import get_setting, get_allowed_tools_for_phase, DANGEROUS_TOOLS
+from project_settings import get_setting, get_allowed_tools_for_phase, DANGEROUS_TOOLS, get_enabled_builtin_skills, get_enabled_user_skills
 
 from prompts import (
     REACT_SYSTEM_PROMPT,
@@ -666,6 +667,32 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         guidance_section += "\nAcknowledge this guidance in your thought.\n"
         system_prompt += guidance_section
         logger.info(f"[{user_id}/{project_id}/{session_id}] Injected {len(guidance_messages)} guidance messages into prompt")
+
+    # SKILL FIT CHECK — appended LAST (highest recency, uncached suffix) so the
+    # model re-evaluates its active attack skill on EVERY turn, in either
+    # direction (generic -> concrete, or a wrong concrete class -> the right
+    # one). Not gated to unclassified: the initial classification can be wrong,
+    # so the agent must be able to correct it mid-run without a phase change.
+    # The "do NOT switch to the skill you already have" line plus the code-level
+    # noop guard in evaluate_skill_switch prevent turn-wasting re-affirmations,
+    # and "no new contradicting evidence" discourages A<->B flip-flop.
+    _skill_label = attack_path_type or "unclassified"
+    system_prompt += (
+        f"\n\n## SKILL FIT CHECK — re-evaluate EVERY turn\n"
+        f"Active attack skill: `{_skill_label}`.\n"
+        f"Before choosing your action, judge whether this skill still matches the STRONGEST "
+        f"current evidence from the live target:\n"
+        f"- If the target now clearly points to a DIFFERENT vulnerability class than "
+        f"`{_skill_label}` (xss, sql_injection, ssrf, rce, path_traversal, ...) — or you are "
+        f"still on a generic `*-unclassified` skill and the class has become clear — your action "
+        f"THIS TURN MUST be `switch_skill` to the correct class, before any further probing or "
+        f"exploitation.\n"
+        f"- If the active skill still fits, or the class is not yet determined, continue — do NOT "
+        f"switch to the skill you already have (that wastes a turn), and do NOT switch without "
+        f"new, contradicting evidence.\n"
+        f"Naming the right class in your thought but not switching is the mistake to avoid. "
+        f"Switching is a first-class action and needs no phase change."
+    )
 
     # Log the full prompt for debugging
     logger.info(f"\n{'#'*80}")
@@ -1646,6 +1673,60 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
             updates["messages"] = [
                 AIMessage(content=f"Phase transition from {phase} to {to_phase} auto-approved (approval not required in settings). Now operating in {to_phase} phase. Proceed with the objective.")
             ]
+
+    elif decision.action == "switch_skill":
+        # Rebind attack_path_type mid-run WITHOUT a phase change. The next think
+        # iteration re-reads attack_path_type and injects the matching skill
+        # workflow (gated only on the skill being enabled + its tool being in the
+        # current phase's allowed_tools — phase itself is never tested). Routing:
+        # _route_after_think sends action=switch_skill straight back to `think`
+        # in every case below, so the agent always keeps working.
+        skill_switch = decision.skill_switch
+        new_skill = skill_switch.to_skill if skill_switch else None
+        current_skill = state.get("attack_path_type", "")
+
+        # Validate against the SAME contract the classifier uses (enabled builtin,
+        # enabled user_skill:<id>, or *-unclassified). Pure decision lives in
+        # state.evaluate_skill_switch so it is unit-testable in isolation.
+        enabled_builtins = get_enabled_builtin_skills()
+        enabled_user_ids = {s.get("id") for s in get_enabled_user_skills()}
+        outcome, resolved = evaluate_skill_switch(
+            new_skill, current_skill, enabled_builtins, enabled_user_ids
+        )
+
+        if outcome == "rejected":
+            logger.warning(
+                f"[{user_id}/{project_id}/{session_id}] switch_skill rejected: "
+                f"'{new_skill}' is not an enabled/valid skill"
+            )
+            updates["messages"] = [HumanMessage(
+                content=f"[system] switch_skill rejected: '{new_skill}' is not an enabled attack "
+                        f"skill. Enabled skills: {sorted(enabled_builtins)}. Keep working with your "
+                        f"current skill, or emit switch_skill again with an enabled to_skill."
+            )]
+        elif outcome == "noop":
+            logger.info(
+                f"[{user_id}/{project_id}/{session_id}] switch_skill to current skill "
+                f"'{resolved}' — no-op, continuing"
+            )
+        else:  # "switched"
+            logger.info(
+                f"[{user_id}/{project_id}/{session_id}] Attack skill switched: "
+                f"'{current_skill or 'unclassified'}' -> '{resolved}'"
+            )
+            updates["attack_path_type"] = resolved
+            reason = (skill_switch.reason if skill_switch else "") or ""
+            updates["messages"] = [AIMessage(
+                content=f"Attack skill switched from '{current_skill or 'unclassified'}' to "
+                        f"'{resolved}'" + (f": {reason}" if reason else "") +
+                        ". The specialized workflow for this skill is now active."
+            )]
+            # Persist the switch to the attack-chain graph (fire-and-forget) so the
+            # UI/graph reflect the new class; core behavior does not depend on this.
+            chain_graph.fire_update_chain_attack_path(
+                neo4j_uri, neo4j_user, neo4j_password,
+                chain_id=session_id, attack_path_type=resolved,
+            )
 
     elif decision.action == "ask_user":
         user_q = decision.user_question

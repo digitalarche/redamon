@@ -3,47 +3,34 @@ import prisma from '@/lib/prisma'
 
 // POST /api/global/tunnel-config/sync
 //
-// Public trigger (no secrets in or out). The kali-sandbox worker calls this on
-// boot to ask the webapp to PUSH the saved tunnel config to the worker's
-// tunnel-manager (kali-sandbox:8015). Credentials never leave the server via a
-// worker-initiated authenticated pull; they ride the same webapp -> worker push
-// channel used when tunnel settings are saved. This keeps the worker free of
-// secrets (least privilege) while still auto-restoring tunnels after a worker
-// restart.
+// Public trigger the kali-sandbox worker calls on boot.
 //
-// Worst case for an unauthenticated caller on the internal network is a
-// redundant re-push of the already-saved config to the worker: no data is
-// disclosed, no state changes. Hence it is safe to expose without the internal
-// key (see PUBLIC_PATHS in middleware.ts).
+// STRIDE I19: a worker (re)boot must NEVER silently re-activate tunnels — that
+// would re-expose internal listeners to the internet and break the LAN-only
+// premise. So on boot we FORCE tunnels down: clear the `tunnelsEnabled` flag and
+// push an empty (stop) config to the tunnel-manager. The operator must
+// deliberately re-enable tunnels from Global Settings, which is the only
+// activation path. Because this only ever DISABLES, it stays safe to expose
+// without auth (an unauthenticated caller can at most turn tunnels off).
 export async function POST() {
   try {
-    const settings = await prisma.userSettings.findFirst({
-      where: {
-        OR: [
-          { ngrokAuthtoken: { not: '' } },
-          { chiselServerUrl: { not: '' } },
-        ],
-      },
-      select: {
-        ngrokAuthtoken: true,
-        chiselServerUrl: true,
-        chiselAuth: true,
-      },
+    // Reflect reality in the UI: tunnels are down after a restart.
+    await prisma.userSettings.updateMany({
+      where: { tunnelsEnabled: true },
+      data: { tunnelsEnabled: false },
     })
 
-    const config = settings ?? {
-      ngrokAuthtoken: '',
-      chiselServerUrl: '',
-      chiselAuth: '',
-    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    const token = process.env.TUNNEL_AUTH_TOKEN
+    if (token) headers['Authorization'] = `Bearer ${token}`
 
     await fetch('http://kali-sandbox:8015/tunnel/configure', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
+      headers,
+      body: JSON.stringify({ ngrokAuthtoken: '', chiselServerUrl: '', chiselAuth: '' }),
     })
 
-    return NextResponse.json({ ok: true, configured: !!settings })
+    return NextResponse.json({ ok: true, configured: false })
   } catch (error) {
     console.error('Tunnel config sync failed:', error)
     // Return 200 so the worker's best-effort boot trigger does not retry-spam.

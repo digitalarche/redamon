@@ -363,3 +363,73 @@ class TestSettingsFieldConsistency:
             "AgentBehaviourSection.tsx still references '.env'"
         assert 'Global Settings' in content, \
             "AgentBehaviourSection.tsx should reference 'Global Settings'"
+
+
+class TestTunnelManagerAuth:
+    """STRIDE I19/S14 — inbound bearer auth on :8015 (fail-open when unset)."""
+
+    def _server(self):
+        import tunnel_manager
+        tunnel_manager._ngrok_proc = None
+        tunnel_manager._chisel_proc = None
+        tunnel_manager._warned_failopen = False
+        from http.server import HTTPServer
+        test_port = 18016
+        tunnel_manager.PORT = test_port
+        server = HTTPServer(("127.0.0.1", test_port), tunnel_manager.TunnelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return server, f"http://127.0.0.1:{test_port}"
+
+    def _req(self, url, method="GET", token=None):
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        data = json.dumps({}).encode() if method == "POST" else None
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            resp = urllib.request.urlopen(req, timeout=5)
+            return resp.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_configure_requires_token_when_set(self):
+        os.environ["TUNNEL_AUTH_TOKEN"] = "secret-token-abc"
+        server, base = self._server()
+        try:
+            assert self._req(f"{base}/tunnel/configure", "POST", token=None) == 401
+            assert self._req(f"{base}/tunnel/configure", "POST", token="wrong") == 401
+            assert self._req(f"{base}/tunnel/configure", "POST", token="secret-token-abc") == 200
+            # status also protected
+            assert self._req(f"{base}/tunnel/status", "GET", token=None) == 401
+            assert self._req(f"{base}/tunnel/status", "GET", token="secret-token-abc") == 200
+            # health stays open (container healthcheck)
+            assert self._req(f"{base}/health", "GET", token=None) == 200
+        finally:
+            server.shutdown()
+            os.environ.pop("TUNNEL_AUTH_TOKEN", None)
+
+    def test_fail_open_when_token_unset(self):
+        os.environ.pop("TUNNEL_AUTH_TOKEN", None)
+        server, base = self._server()
+        try:
+            # No token configured → accept without auth (dev fail-open).
+            assert self._req(f"{base}/tunnel/configure", "POST", token=None) == 200
+        finally:
+            server.shutdown()
+
+
+class TestTunnelExposureNarrowed:
+    """STRIDE I19 — chisel no longer publishes the internal :8080 listener."""
+
+    def test_chisel_no_r8080_mapping(self):
+        path = os.path.join(os.path.dirname(__file__), '..', 'mcp', 'servers', 'tunnel_manager.py')
+        with open(path) as f:
+            content = f.read()
+        assert "R:8080" not in content, "chisel R:8080 mapping must be removed (I19)"
+        assert "R:4444:localhost:4444" in content
+
+    def test_tunnels_enabled_gate_present(self):
+        schema = os.path.join(os.path.dirname(__file__), '..', 'webapp', 'prisma', 'schema.prisma')
+        with open(schema) as f:
+            assert "tunnelsEnabled" in f.read(), "tunnelsEnabled gate must exist in Prisma schema"

@@ -185,6 +185,10 @@ _FORBIDDEN_MEMBER_ACTIONS = {
     "deploy_fireteam": "deploy_forbidden_in_member",
     "transition_phase": "requested_phase_escalation",
     "ask_user": "cannot_ask_in_member",
+    # A member's attack_path_type is a read-only snapshot of the parent's and its
+    # state is discarded on collect, so a member switching the skill is a no-op at
+    # best and unhandled at worst. Only the root agent may rebind the skill.
+    "switch_skill": "cannot_switch_skill_in_member",
 }
 
 

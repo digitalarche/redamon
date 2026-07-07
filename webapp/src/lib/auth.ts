@@ -39,3 +39,31 @@ export async function verifyToken(token: string): Promise<{ sub: string; role: s
     return null
   }
 }
+
+// --- Agent WebSocket ticket (STRIDE S6) ---------------------------------------
+// Short-lived HS256 ticket that binds an authenticated operator identity to a
+// (projectId, sessionId) so the agent can verify the /ws/agent init frame. Signed
+// with a DEDICATED secret (never AUTH_SECRET) so an agent-side compromise cannot
+// forge login cookies. Returns null when the secret is unset — the agent then
+// fails open (dev), so the WS still connects.
+const WS_TICKET_EXPIRY = '60s'
+
+function getWsTicketSecret(): Uint8Array | null {
+  const secret = process.env.AGENT_WS_TICKET_SECRET
+  if (!secret || secret === 'changeme') return null
+  return new TextEncoder().encode(secret)
+}
+
+export async function createWsTicket(
+  userId: string,
+  projectId: string,
+  sessionId: string
+): Promise<string | null> {
+  const key = getWsTicketSecret()
+  if (!key) return null
+  return new SignJWT({ sub: userId, pid: projectId, sid: sessionId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(WS_TICKET_EXPIRY)
+    .sign(key)
+}
