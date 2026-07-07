@@ -70,6 +70,87 @@ from tools import set_tenant_context, set_phase_context, set_graph_view_context
 logger = logging.getLogger(__name__)
 
 
+def _complete_transition_todos(todo_list, to_phase):
+    """Mark any open "request transition to <phase>" todo as completed.
+
+    A leftover in-progress transition todo is one of the anchors that keeps the
+    model re-requesting a phase change it already completed (the think prompt is
+    rebuilt stateless each turn and renders the todo list, so an open transition
+    task reads as unfinished work). Scoped narrowly: only todos that clearly
+    describe a phase transition are touched.
+    """
+    out = []
+    for item in (todo_list or []):
+        d = dict(item) if isinstance(item, dict) else item
+        try:
+            if isinstance(d, dict):
+                desc = (d.get("description", "") or "").lower()
+                if (d.get("status") != "completed"
+                        and "transition" in desc
+                        and ("phase" in desc or str(to_phase) in desc)):
+                    d = {**d, "status": "completed"}
+        except Exception:
+            pass
+        out.append(d)
+    return out
+
+
+def _phase_breadcrumb_trace(state, updates, iteration, phase, *, redundant, count=0):
+    """Append a phase-change note into execution_trace and return the new list.
+
+    execution_trace is the ONLY channel that reaches the think LLM next turn: the
+    node rebuilds a stateless prompt and never replays state["messages"], so the
+    AIMessage/HumanMessage nudges elsewhere are invisible to the reasoning model.
+    The correction has to live in the trace (rendered as chain_context) to work.
+    `count` escalates the wording on repeated no-op requests.
+    """
+    if redundant:
+        if count >= 2:
+            analysis = (
+                f"STOP RE-REQUESTING THE PHASE. You have asked to transition to "
+                f"{phase} {count} times in a row while already in {phase} — this is a "
+                f"no-op loop that makes no progress. Your NEXT output MUST be a "
+                f"concrete tool call executing the first action from your plan. Do "
+                f"NOT emit transition_phase again."
+            )
+        else:
+            analysis = (
+                f"You are already in {phase} phase; that transition request was a "
+                f"no-op. Do NOT request transition_phase to {phase} again — proceed "
+                f"directly to your next concrete step (probe/build/submit your payload)."
+            )
+        step = ExecutionStep(
+            iteration=iteration,
+            phase=phase,
+            thought=f"Redundant transition_phase to {phase} ignored (already in {phase}).",
+            reasoning="Agent re-requested a phase it is already in; no state change.",
+            tool_name="phase_transition",
+            tool_args={"to_phase": phase, "redundant": True},
+            tool_output=f"NO-OP: already in {phase} phase (redundant request #{count}).",
+            success=True,
+            output_analysis=analysis,
+        )
+    else:
+        step = ExecutionStep(
+            iteration=iteration,
+            phase=phase,
+            thought=f"Phase auto-approved; now operating in {phase} phase.",
+            reasoning=f"Transition to {phase} required no approval and was applied.",
+            tool_name="phase_transition",
+            tool_args={"to_phase": phase},
+            tool_output=f"PHASE TRANSITION AUTO-APPROVED. Now operating in {phase} phase.",
+            success=True,
+            output_analysis=(
+                f"You are now in {phase} phase and may use {phase}-specific tools. DO "
+                f"NOT request another transition to {phase} - you are already there. "
+                f"Proceed directly to the next concrete step (probe/build/submit your "
+                f"payload)."
+            ),
+        )
+    base = updates["execution_trace"] if "execution_trace" in updates else state.get("execution_trace", [])
+    return base + [step.model_dump()]
+
+
 async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_creds, streaming_callbacks=None, graph_view_cyphers=None) -> dict:
     """
     Core ReAct reasoning node.
@@ -917,6 +998,7 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
         "todo_list": todo_list,
         "_decision": decision.model_dump(),
         "_just_transitioned_to": None,  # Clear the marker
+        "_redundant_transition_count": 0,  # Reset no-op transition loop counter (redundant branches override)
         "_reject_tool": False,  # Clear tool rejection marker from previous iteration
         "_tool_confirmation_mode": None,  # Clear mode from previous confirmation
         "_completed_step": None,  # Will be set if we process pending output
@@ -1622,8 +1704,21 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
             logger.warning(f"[{user_id}/{project_id}/{session_id}] Ignoring transition to same phase: {phase}")
             if decision.tool_name:
                 updates["_decision"]["action"] = "use_tool"
+                updates["_redundant_transition_count"] = 0
             else:
-                logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think")
+                _rc = int(state.get("_redundant_transition_count", 0) or 0) + 1
+                updates["_redundant_transition_count"] = _rc
+                logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think (redundant same-phase transition #{_rc})")
+                # Deliver the correction on the channel the model actually re-reads
+                # (execution_trace -> chain_context), clear the leftover transition
+                # todo, and escalate wording after repeats. The messages nudge below
+                # never reaches the think LLM (state["messages"] is not replayed).
+                updates["todo_list"] = _complete_transition_todos(
+                    updates.get("todo_list") or state.get("todo_list", []), phase
+                )
+                updates["execution_trace"] = _phase_breadcrumb_trace(
+                    state, updates, iteration, phase, redundant=True, count=_rc
+                )
                 updates["messages"] = [HumanMessage(
                     content=f"[system] You are ALREADY in the {phase} phase — that transition was a "
                             f"no-op and did NOT end anything. Do NOT request transition_phase to "
@@ -1637,8 +1732,17 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
             logger.warning(f"[{user_id}/{project_id}/{session_id}] Ignoring re-request for recent transition to: {to_phase}")
             if decision.tool_name:
                 updates["_decision"]["action"] = "use_tool"
+                updates["_redundant_transition_count"] = 0
             else:
-                logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think")
+                _rc = int(state.get("_redundant_transition_count", 0) or 0) + 1
+                updates["_redundant_transition_count"] = _rc
+                logger.info(f"[{user_id}/{project_id}/{session_id}] No tool specified, looping back to think (redundant re-request #{_rc})")
+                updates["todo_list"] = _complete_transition_todos(
+                    updates.get("todo_list") or state.get("todo_list", []), to_phase
+                )
+                updates["execution_trace"] = _phase_breadcrumb_trace(
+                    state, updates, iteration, to_phase, redundant=True, count=_rc
+                )
                 updates["messages"] = [HumanMessage(
                     content=f"[system] You just transitioned to {to_phase} and are already there. "
                             f"Do NOT request that transition again. Proceed with your workflow's next step."
@@ -1680,6 +1784,19 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                 PhaseHistoryEntry(phase=to_phase).model_dump()
             ]
             updates["_just_transitioned_to"] = to_phase
+            updates["_redundant_transition_count"] = 0
+            # Record the transition in execution_trace so the think LLM actually
+            # sees it next turn (it never replays state["messages"]), and check off
+            # any leftover "request transition" todo so it stops reading as open
+            # work. Mirrors the approval-node path, which the manual-approval flow
+            # already does; the auto-approve path previously skipped both, which is
+            # what let the model loop re-requesting a transition it already had.
+            updates["execution_trace"] = _phase_breadcrumb_trace(
+                state, updates, iteration, to_phase, redundant=False
+            )
+            updates["todo_list"] = _complete_transition_todos(
+                updates.get("todo_list") or state.get("todo_list", []), to_phase
+            )
             updates["messages"] = [
                 AIMessage(content=f"Phase transition from {phase} to {to_phase} auto-approved (approval not required in settings). Now operating in {to_phase} phase. Proceed with the objective.")
             ]
@@ -1709,6 +1826,28 @@ async def think_node(state: AgentState, config, *, llm, guidance_queues, neo4j_c
                 f"[{user_id}/{project_id}/{session_id}] switch_skill rejected: "
                 f"'{new_skill}' is not an enabled/valid skill"
             )
+            # Same root cause as the redundant phase-transition churn: state["messages"]
+            # is never replayed into the stateless think prompt, so a messages-only
+            # rejection is invisible to the model and it can re-request the same invalid
+            # skill in a loop. Put the correction into execution_trace (chain_context),
+            # the channel the think LLM actually re-reads.
+            _rej_step = ExecutionStep(
+                iteration=iteration,
+                phase=phase,
+                thought=f"switch_skill to '{new_skill}' rejected (not an enabled skill).",
+                reasoning="Requested attack skill is not enabled/valid.",
+                tool_name="switch_skill",
+                tool_args={"to_skill": new_skill, "rejected": True},
+                tool_output=f"REJECTED: '{new_skill}' is not an enabled attack skill.",
+                success=False,
+                output_analysis=(
+                    f"Do NOT request switch_skill to '{new_skill}' again — it is not "
+                    f"enabled. Enabled skills: {sorted(enabled_builtins)}. Keep working "
+                    f"with your current skill, or switch to one of the enabled skills."
+                ),
+            )
+            _rej_base = updates["execution_trace"] if "execution_trace" in updates else state.get("execution_trace", [])
+            updates["execution_trace"] = _rej_base + [_rej_step.model_dump()]
             updates["messages"] = [HumanMessage(
                 content=f"[system] switch_skill rejected: '{new_skill}' is not an enabled attack "
                         f"skill. Enabled skills: {sorted(enabled_builtins)}. Keep working with your "

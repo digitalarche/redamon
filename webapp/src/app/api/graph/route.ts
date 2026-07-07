@@ -1,9 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
+import prisma from '@/lib/prisma'
 import { getSession } from './neo4j'
 import { formatGraphRecords } from './format'
 import { getCached, setCached, invalidateCache } from './cache'
 
 const GRAPH_PERF_DEBUG = true
+
+// Read-time reconcile: attack-chain nodes are session-scoped by chain_id (=
+// conversation sessionId). Deleting a conversation is supposed to remove its
+// chain subgraph, but a still-running agent loop can re-MERGE the AttackChain
+// into Neo4j AFTER that delete (cancellation is not instant), orphaning the
+// chain with no matching conversation. Those orphans then render on /graph with
+// no way to remove them. Here we self-heal on every cache-miss read: delete any
+// AttackChain-family node for the project whose chain_id has no live
+// conversation, BEFORE the main query runs, so orphans are both purged from
+// storage and never returned. Best-effort — a failure must not block the graph.
+async function reconcileOrphanChains(
+  session: ReturnType<typeof getSession>,
+  projectId: string
+): Promise<void> {
+  try {
+    const conversations = await prisma.conversation.findMany({
+      where: { projectId },
+      select: { sessionId: true },
+    })
+    const liveSessionIds = conversations.map(c => c.sessionId).filter(Boolean)
+
+    // NOTE: when liveSessionIds is empty, `NOT chain_id IN []` is true for every
+    // chain node, so all chains for the project are purged — correct, since no
+    // live conversation means every chain is an orphan. Nodes with a null
+    // chain_id evaluate to null (not true) and are left untouched.
+    const res = await session.run(
+      `MATCH (n)
+       WHERE n.project_id = $projectId
+         AND (n:AttackChain OR n:ChainStep OR n:ChainFinding OR n:ChainDecision OR n:ChainFailure)
+         AND NOT n.chain_id IN $liveSessionIds
+       DETACH DELETE n
+       RETURN count(n) AS purged`,
+      { projectId, liveSessionIds }
+    )
+    const purged = res.records[0]?.get('purged')
+    const purgedCount = typeof purged === 'object' && purged?.toNumber ? purged.toNumber() : Number(purged) || 0
+    if (GRAPH_PERF_DEBUG && purgedCount > 0) {
+      console.log(`[GraphPerf:API] Reconcile purged ${purgedCount} orphan chain node(s) for ${projectId}`)
+    }
+  } catch (err) {
+    console.error('[GraphPerf:API] Orphan-chain reconcile failed (continuing):', err)
+  }
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -64,6 +108,9 @@ export async function GET(request: NextRequest) {
   const session = getSession()
 
   try {
+    // Self-heal orphaned attack-chain nodes before reading (see fn comment).
+    await reconcileOrphanChains(session, projectId)
+
     const queryStart = Date.now()
 
     // Query all nodes and relationships connected to the project

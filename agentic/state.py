@@ -881,6 +881,7 @@ class AgentState(TypedDict):
     _decision: Optional[dict]  # LLM decision from think node
     _tool_result: Optional[dict]  # Result from tool execution
     _just_transitioned_to: Optional[str]  # Phase we just transitioned to (prevents re-requesting)
+    _redundant_transition_count: int  # Consecutive no-op transition_phase requests to the current phase
     _abort_transition: bool  # True when user aborted a phase transition (routes to generate_response)
     _guardrail_blocked: bool  # True when project target was blocked by the scope guardrail
 
@@ -1082,6 +1083,7 @@ def create_initial_state(
         "_decision": None,
         "_tool_result": None,
         "_just_transitioned_to": None,
+        "_redundant_transition_count": 0,
         "_abort_transition": False,
         "_guardrail_blocked": False,
         "_current_plan": None,
