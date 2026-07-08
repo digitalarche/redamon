@@ -283,6 +283,7 @@ export function AIAssistantDrawer({
     iterationCount,
     modelName: modelName ?? '',
     todoList,
+    sessionId,
   })
 
   // ─── Side effects ─────────────────────────────────────────────────────────

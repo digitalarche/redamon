@@ -58,6 +58,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
   padding: var(--space-3) var(--space-4);
   background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-primary) 40%, var(--color-crimson-800) 100%);
   border-bottom: 1px solid var(--border-default);
@@ -68,6 +70,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  /* Allow the left cluster to absorb the width squeeze so the action
+     buttons on the right never wrap to a second line. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .headerIcon {
@@ -76,6 +82,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
+  flex-shrink: 0;
   background: transparent;
   border: 1px solid #d32f2f; /* RedAmon primary crimson */
   border-radius: var(--radius-lg);
@@ -86,6 +93,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-0-5);
+  min-width: 0;
 }
 
 .stealthBadge {
@@ -419,6 +427,9 @@
   font-weight: var(--font-semibold);
   color: var(--text-primary);
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .subtitle {
@@ -430,6 +441,11 @@
   display: flex;
   align-items: center;
   gap: 0.375rem;
+  /* When the drawer is narrow, the status badges wrap onto their own line
+     inside the left column instead of shoving the action buttons down. */
+  flex-wrap: wrap;
+  min-width: 0;
+  row-gap: var(--space-1);
 }
 
 .sessionCode {
@@ -476,6 +492,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-1);
+  /* Keep every action button on a single row regardless of drawer width. */
+  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .iconButton {
@@ -484,6 +503,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   background: var(--bg-primary);
   border: none;
   border-radius: var(--radius-md);
@@ -516,6 +536,7 @@
 .closeButton {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;

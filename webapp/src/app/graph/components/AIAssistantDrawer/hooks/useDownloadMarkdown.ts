@@ -12,10 +12,24 @@ interface DownloadMarkdownDeps {
   iterationCount: number
   modelName: string
   todoList: TodoItem[]
+  sessionId: string
+}
+
+// Human-readable wall time from a duration in seconds (e.g. 1960 -> "32m 40s").
+function formatWallClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  const parts: string[] = []
+  if (h > 0) parts.push(`${h}h`)
+  if (h > 0 || m > 0) parts.push(`${m}m`)
+  parts.push(`${sec}s`)
+  return parts.join(' ')
 }
 
 export function useDownloadMarkdown(deps: DownloadMarkdownDeps) {
-  const { chatItems, currentPhase, iterationCount, modelName, todoList } = deps
+  const { chatItems, currentPhase, iterationCount, modelName, todoList, sessionId } = deps
 
   const handleDownloadMarkdown = useCallback(async () => {
     if (chatItems.length === 0) return
@@ -23,13 +37,47 @@ export function useDownloadMarkdown(deps: DownloadMarkdownDeps) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
     const lines: string[] = []
 
+    // ─── Session-wide metrics for the header (XBEN evaluation fields) ──────────
+    // Token totals: root ThinkingItems carry per-turn deltas; fireteam members
+    // track cumulative totals. Summing both matches the on-screen drawer header.
+    let totalInput = 0
+    let totalOutput = 0
+    let firstTs: number | null = null
+    let lastTs: number | null = null
+    for (const item of chatItems) {
+      const ts = 'timestamp' in item && item.timestamp ? item.timestamp.getTime() : null
+      if (ts !== null && !Number.isNaN(ts)) {
+        if (firstTs === null || ts < firstTs) firstTs = ts
+        if (lastTs === null || ts > lastTs) lastTs = ts
+      }
+      if (!('type' in item)) continue
+      if (item.type === 'thinking') {
+        totalInput += item.input_tokens ?? 0
+        totalOutput += item.output_tokens ?? 0
+      } else if (item.type === 'fireteam') {
+        for (const m of item.members) {
+          totalInput += m.input_tokens_used ?? 0
+          totalOutput += m.output_tokens_used ?? 0
+        }
+      }
+    }
+    const hasTokenTotal = totalInput > 0 || totalOutput > 0
+    const wallSeconds = firstTs !== null && lastTs !== null ? (lastTs - firstTs) / 1000 : null
+
     // Header
     lines.push('# AI Agent Session Report')
     lines.push('')
     lines.push(`**Date:** ${new Date().toLocaleString()}  `)
+    if (sessionId) lines.push(`**Session:** ${sessionId}  `)
     lines.push(`**Phase:** ${PHASE_CONFIG[currentPhase].label}  `)
     if (iterationCount > 0) lines.push(`**Step:** ${iterationCount}  `)
     if (modelName) lines.push(`**Model:** ${formatModelDisplay(modelName)}  `)
+    if (wallSeconds !== null) {
+      lines.push(`**Wall time:** ${formatWallClock(wallSeconds)} (${Math.round(wallSeconds)}s)  `)
+    }
+    if (hasTokenTotal) {
+      lines.push(`**Tokens:** in ${totalInput.toLocaleString()} · out ${totalOutput.toLocaleString()} · total ${(totalInput + totalOutput).toLocaleString()}  `)
+    }
     lines.push('')
     lines.push('---')
     lines.push('')
@@ -369,7 +417,7 @@ export function useDownloadMarkdown(deps: DownloadMarkdownDeps) {
       'text/markdown;charset=utf-8',
       () => sessionChunks(),
     )
-  }, [chatItems, currentPhase, iterationCount, modelName, todoList])
+  }, [chatItems, currentPhase, iterationCount, modelName, todoList, sessionId])
 
   return { handleDownloadMarkdown }
 }
