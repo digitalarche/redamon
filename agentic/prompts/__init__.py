@@ -311,7 +311,8 @@ def get_phase_tools(
                 "\n## ASSESSMENT ONLY MODE (ACTIVE)\n"
                 "You are in ASSESSMENT-ONLY mode. Do NOT execute any DoS attack.\n"
                 "Only research and report whether the target is VULNERABLE to DoS:\n"
-                "- Run nmap scripts (--script dos, --script rdp-ms12-020)\n"
+                "- Run nmap DoS scripts appropriate to the OPEN services (`--script dos`; add\n"
+                "  service-specific checks like `rdp-ms12-020` ONLY when that service, e.g. RDP/3389, is actually present)\n"
                 "- Run nuclei -tags dos\n"
                 "- Research known DoS CVEs for detected service versions\n"
                 '- Report findings with action="complete"\n'

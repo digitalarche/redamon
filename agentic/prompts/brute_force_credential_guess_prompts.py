@@ -95,7 +95,7 @@ Based on the target service, select the correct Hydra protocol string:
 | HTTP POST Form | 80/443 | `http-post-form` | **Special syntax** (see below) |
 | Tomcat | 8080 | `http-get` | Path: `/manager/html` |
 | WordPress | 80/443 | `http-post-form` | Analyze login form first |
-| Jenkins | 8080 | `http-post-form` | Path: `/j_acegi_security_check` |
+| Jenkins | 8080 | `http-post-form` | Path: `/j_spring_security_check` (modern) or `/j_acegi_security_check` (legacy Hudson) — confirm which the login form POSTs to |
 | Oracle | 1521 | `oracle-listener` | |
 | SNMP | 161 | `snmp` | Community string guessing |
 
@@ -184,7 +184,9 @@ With domain: `-l "DOMAIN\\administrator" -P passwords.txt {hydra_flags} smb://<i
 
 #### HTTP POST Form (SPECIAL SYNTAX):
 
-**IMPORTANT:** For `http-post-form`, the target IP comes BEFORE the protocol, and the form specification uses colon `:` separators:
+**IMPORTANT:** For `http-post-form`, the target IP comes BEFORE the protocol, and the form specification uses colon `:` separators.
+
+**The path, field names, and failure string below are PLACEHOLDERS — read them off the real login form first.** Fetch the form and inspect it: the action path may be `/session`, `/auth`, `/api/login`, etc.; the fields may be `email`/`user`/`login` not `username`/`password`; there may be a CSRF token to carry; and the failure string must be text that actually appears on a failed login (or use `S=` for a success marker). Using the literal values below verbatim against an app that differs yields false negatives ("0 valid").
 
 ```
 -l admin -P /usr/share/metasploit-framework/data/wordlists/http_default_pass.txt {hydra_flags} <ip> http-post-form "/login.php:username=^USER^&password=^PASS^:F=Invalid"
@@ -302,7 +304,17 @@ Use `action="complete"` after successfully discovering and reporting credentials
 HYDRA_WORDLIST_GUIDANCE = """
 ## Available Wordlists Reference
 
-**Location:** `/usr/share/metasploit-framework/data/wordlists/`
+**Location:** `/usr/share/metasploit-framework/data/wordlists/` (Metasploit's bundled lists).
+
+**Before relying on any path below, confirm it exists** — these lists only ship with a full
+Kali+Metasploit image and MAY be absent. Run one check up front:
+```
+kali_shell("ls /usr/share/metasploit-framework/data/wordlists/ 2>/dev/null; ls /usr/share/seclists/ 2>/dev/null; ls /usr/share/wordlists/ 2>/dev/null")
+```
+If the metasploit path is missing, substitute an available equivalent — SecLists
+(`/usr/share/seclists/Passwords/...`, `/usr/share/seclists/Usernames/...`) or
+`/usr/share/wordlists/rockyou.txt` — rather than firing hydra at a non-existent file
+(which fails with a file-not-found and looks like "0 valid passwords").
 
 **Hydra flag mapping:**
 - Single username: `-l <username>`

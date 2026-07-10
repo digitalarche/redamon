@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.4] - 2026-07-10
+
+### Changed
+
+- **Built-in attack-skill prompt hardening — SSTI engine-fingerprinting, SQLi objective-triage + auth-bypass-first, and vulnerability-class → skill routing** ([agentic/prompts/rce_prompts.py](agentic/prompts/rce_prompts.py), [agentic/prompts/sql_injection_prompts.py](agentic/prompts/sql_injection_prompts.py), [agentic/prompts/classification.py](agentic/prompts/classification.py)). The **RCE / SSTI** skill now fingerprints the template engine before concluding "no SSTI": it teaches that sandboxed / logic-less engines (Django templates, Handlebars, Mustache, Liquid, Go `text/template`) do **not** evaluate the `{{7*7}}` arithmetic canary, so a non-`49` result is not evidence the target is safe — confirm instead via **context disclosure** (`{% debug %}` / reading a variable already in the render context), and drive **deferred / stateful render sinks** (multi-step wizards, template-generated emails / PDFs / JS) to their final render before abandoning the class. The **SQL injection** skill gains an **objective-triage gate** (route by *where the target lives* — a DB row → boolean/UNION extraction; a filesystem artifact or code-execution goal → `LOAD_FILE` / `INTO OUTFILE` / an app-level file-upload pivot, not char-by-char extraction) and an **auth-bypass-first** discipline on login forms (sweep every injectable field × multiple payload shapes for a bypass *before* any blind extraction, since login handlers frequently run more than one query and a single failed comment payload does not prove bypass impossible), with an anti-deadlock note bounding blind extraction. A generic **vulnerability-class → housing-skill routing map** lets the agent reach the right skill when a class has no dedicated module (template-injection / expression-language / deserialization / command-injection → `rce`, LFI / directory-traversal → `path_traversal`, etc.) instead of stalling on an unrecognised skill name. All edits are generic, session-agnostic pentest tradecraft.
+
+---
+
 ## [5.3.3] - 2026-07-07
 
 ### Security

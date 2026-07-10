@@ -259,8 +259,13 @@ def build_classification_prompt(objective: str) -> str:
                  "      - For general reconnaissance with no specific attack intent (e.g., 'show attack surface', "
                  "'what vulnerabilities exist'), use **recon-unclassified**")
 
-    default_type = "cve_exploit" if "cve_exploit" in enabled_builtins else "recon-unclassified"
-    parts.append(f'\n   If truly unclear (e.g., vague "hack the target"), default to "{default_type}".\n')
+    # A vague "hack the target" should start with surface discovery, NOT jump straight
+    # into the Metasploit/CVE workflow (which assumes a known-CVE target). Prefer
+    # recon-unclassified when it is available; only fall back to cve_exploit if recon
+    # is somehow not an enabled path.
+    default_type = "recon-unclassified"
+    parts.append(f'\n   If truly unclear (e.g., vague "hack the target"), default to "{default_type}" '
+                 '(gather the attack surface first, then reclassify to a specific skill).\n')
 
     parts.append("3. Extract TARGET HINTS from the request (best-effort, used for graph linking):\n"
                  '   - target_host: IP address or hostname mentioned (e.g., "10.0.0.5", "www.example.com"). null if none found.\n'

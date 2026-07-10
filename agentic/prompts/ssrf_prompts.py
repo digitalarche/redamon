@@ -47,7 +47,7 @@ Cloud providers in scope:      {ssrf_cloud_providers}
 - ALWAYS run Step 1 (graph-driven surface inventory) BEFORE firing payloads. Blind spraying is noisy and gets WAFed.
 - ALWAYS establish an OAST oracle (Step 2) before claiming a finding. Timeout alone is NEVER sufficient evidence.
 - NEVER claim "internal access" from a single timing differential. Confirm with content match, status code variation, OR OAST callback.
-- When the target shows uniform 4xx across all internal IP variants AND all schemes, the sink is hardened. STOP and pivot to a different sink rather than chaining bypasses.
+- When the target shows uniform 4xx across all internal IP variants AND all schemes, the sink is LIKELY hardened — but a front WAF, a wrong parameter name, or auth-gating on the fetch endpoint give the same signature, so first confirm a VALID external URL actually fetches. Only once the sink genuinely validates every axis, pivot to a different sink rather than chaining bypasses.
 - If `Cloud metadata pivots: False`, do NOT probe 169.254.169.254, metadata.google.internal, or equivalent. The engagement RoE forbids it.
 - If `Gopher / RCE chain payloads: False`, do NOT attempt gopher://, dict://, or Redis/FCGI/Docker RCE chains. Stop at internal-service banner disclosure.
 
@@ -173,7 +173,7 @@ Black-box signals that a real defense is in place. Use these to avoid wasting bu
 | External URL works, then identical external URL fails after seconds | DNS pinning (resolve-once) |
 | 169.254.169.254 fails AND 169.254.169.254.nip.io also fails | Resolved-IP block, not hostname block |
 
-If 4+ of these fire on one sink, it is hardened. Pivot to a different sink rather than chaining bypasses.
+Several of these firing together is a strong signal the sink is well-hardened — treat it as a lead, not proof (some co-occur for benign reasons). When the sink genuinely validates on every axis you test, pivot to a different sink rather than chaining bypasses.
 
 ### Step 7: Confidence scoring + reporting
 

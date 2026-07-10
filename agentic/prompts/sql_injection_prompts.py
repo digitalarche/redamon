@@ -39,16 +39,16 @@ Tamper scripts: {sqli_tamper_scripts}
 Before extracting anything, answer two questions and let them route the whole workflow.
 Do NOT default to dumping the database — extraction is one primitive, not the goal.
 
-**A. WHERE does the objective live?** (this determines the primitive, not the reverse)
-- **A database row** (a credential, token, or record stored in a table) -> boolean / UNION /
-  error-based extraction is appropriate; proceed with the extraction steps below.
-- **A filesystem artifact** (a secret/flag file, application source, or a config on disk)
-  **or the goal is code execution** -> char-by-char row extraction is the WRONG primitive.
-  Prefer, in order: file read (`LOAD_FILE`, `sqlmap --file-read`), file write / webshell drop
+**A. WHERE is the objective most likely to live?** You usually will NOT know a priori --
+let evidence (the app's function, schema enumeration, the stated goal) route you, and revise
+as you learn. The point is only that **extraction is one primitive, not the default**:
+- If the objective is **a stored record** (a credential, token, or row in a table) -> boolean /
+  UNION / error-based extraction is appropriate; proceed with the extraction steps below.
+- If evidence shows it is **on disk, or the goal is code execution** -> extraction is the wrong
+  tool; consider file read (`LOAD_FILE`, `sqlmap --file-read`), file write / webshell drop
   (`INTO OUTFILE`, `sqlmap --file-write`), or an **application-level pivot** to authenticated
-  functionality (file upload, import/export, admin actions, second-order sinks) that yields RCE
-  or a direct file read. Confirm the objective's location before spending iterations on blind
-  extraction.
+  functionality (uploads, import/export, admin actions, second-order sinks). Do not commit to
+  blind extraction until you have reason to believe the objective is actually a DB row.
 
 **B. Is the injectable surface a LOGIN / AUTH form with a content/boolean oracle?**
 If yes, the value of the injection is the ACCESS it unlocks, not the DB contents. FIRST test it
@@ -201,7 +201,7 @@ it, re-confirm (Step 0-A) that the objective actually IS a database row. If sche
 shows no table/column that could hold the objective, or the objective is a filesystem artifact,
 STOP extracting and pivot — auth-bypass access, `LOAD_FILE` / `INTO OUTFILE`, or an app-level RCE
 surface. Do NOT keep extracting version / current-user / schema once they are no longer on the
-path to the objective; enumerating DBMS metadata is not progress toward a flag that is not in the DB.
+path to the objective; enumerating DBMS metadata is not progress toward an objective that does not live in the database.
 
 ### Step 7: Post-SQLi Escalation (if possible)
 

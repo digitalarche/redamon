@@ -1339,7 +1339,7 @@ class AgentOrchestrator:
                 raise RuntimeError("No final state returned from graph execution")
 
         except Exception as e:
-            logger.error(f"[{user_id}/{project_id}/{session_id}] Streaming error: {e}")
+            logger.error(f"[{user_id}/{project_id}/{session_id}] Streaming error: {e}", exc_info=True)
             await streaming_callback.on_error(str(e), recoverable=False)
             return InvokeResponse(error=str(e))
         finally:

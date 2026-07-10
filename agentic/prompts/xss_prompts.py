@@ -19,10 +19,17 @@ XSS_TOOLS = """
 
 ---
 
-## STOP — read these 3 checks BEFORE you build or theorize about any payload
+## STOP — read these 4 checks BEFORE you build or theorize about any payload
 
 These are the failures that most often waste a whole session. Re-read them every time
 you form a hypothesis about the target.
+
+**FIRST decide which oracle you have — it changes everything below.** Only SOME targets score
+your payload with a server-side headless bot / "submit-solution" judge (a *grader*). On ordinary
+reflected / stored / DOM XSS there is NO grader: **your own Playwright `page.on("dialog")`
+capture IS the definitive proof** — trust it and `complete`, do not invent a grader to satisfy.
+The grader-specific rules below (checks 2-4, the abandonment gate, "trust the grader") apply ONLY
+once you have positively observed a scoring bot; do not apply grader logic to a plain reflection.
 
 1. **LOCATE, don't theorize.** State WHERE your marker literally lands in the RAW response
    (HTML body / quoted attribute `value="…"` / unquoted attribute / inside `<script>` /
@@ -48,8 +55,36 @@ you form a hypothesis about the target.
    requirements — (a) break out into the right context, (b) a self-firing event, (c) build the
    required value under the filter — SEPARATELY, then combine into one payload.
 
+4. **A result that stays CONSTANT while your payloads VARY is caused by something ALL of them
+   SHARE — it is NOT proof the target is broken.** If many structurally different payloads
+   return the byte-identical verdict or error, the invariant is your common factor: your
+   bypass primitive, a whitespace/separator choice, an encoding layer, your quoting, or one
+   fixed event handler — not the grader. Isolate it: hold everything else constant and change
+   ONLY the shared component, one at a time. A target that still returns OTHER, DIFFERENT
+   messages to other inputs (a filter notice here, a "try again" there, an error elsewhere) is
+   ALIVE and discriminating — a genuinely broken grader cannot tell your inputs apart. NEVER
+   abandon the vulnerability class, and NEVER pivot to a different one, on the strength of a
+   constant error until you have varied every shared component of your own payloads and the
+   constant still holds.
+
 Decompose. One failed combined payload does not mean the class is wrong; it usually means one
 of the three sub-parts (a/b/c) is off. Vary that sub-part, not your whole theory.
+
+**ABANDONMENT GATE — you may NOT declare the injection class dead, the grader "broken", or your
+input "evaluated server-side / by an interpreter", until ALL THREE of these are on record in your
+trace:**
+1. the LITERAL reflection position, quoted from the RAW response body (never inferred from an
+   error message or status text);
+2. the EXHAUSTIVE single-character starter sweep complete — every `a-z` and `A-Z` individually
+   tested after `<`, with the survivor set written down (Step 3c.0). "A few samples rejected" is
+   NOT this;
+3. each surviving starter carried through to the grader as a custom element with a self-firing
+   handler (Step 6), and still failing.
+Until all three are done, the ONLY correct action is to CONTINUE inside the class — never pivot
+class, never conclude the target is broken, never invent a server-side interpreter. A constant
+error while these are incomplete is evidence about YOUR shared payload components, not about the
+target (check 4). Skipping any of the three means you have tested a few FORMS of the class, not
+the class.
 
 ---
 
@@ -69,7 +104,7 @@ CSP bypass guidance:           {xss_csp_bypass_enabled}
 - NEVER use raw `alert()` text alone as proof. The agent MUST capture it via Playwright `page.on("dialog", ...)` so the trace contains evidence.
 - NEVER spray payloads on every parameter blindly. Run the canary sweep (Step 3) and the per-char filter probe (Step 3b) FIRST -- blind spraying is noisy and gets WAFed.
 - ALWAYS check for `Content-Security-Policy` response header before crafting payloads. CSP changes everything.
-- TRUST THE GRADER, NOT YOUR OWN BROWSER. When a target renders/scores your payload server-side (a headless bot, a "submit solution" judge), the ONLY oracle is that target's response. If a payload fires in your local Playwright/Chromium but the target still says you failed, believe the target -- graders often run a DIFFERENT or OLDER engine (PhantomJS, legacy WebKit, HtmlUnit) that parses tags, fires events, and throws errors differently. A local render that "confirms" your payload is not proof; only the grader's positive signal is.
+- TRUST THE GRADER, NOT YOUR OWN BROWSER. When a target renders/scores your payload server-side (a headless bot, a "submit solution" judge), the ONLY oracle is that target's response. If a payload fires in your local Playwright/Chromium but the target still says you failed, believe the target -- graders often run a DIFFERENT or OLDER engine (PhantomJS, legacy WebKit, HtmlUnit) that parses tags, fires events, and throws errors differently. A local render that "confirms" your payload is not proof; only the grader's positive signal is. (Conversely, when NO such grader exists — ordinary reflected/stored/DOM XSS — your own dialog capture IS the proof; do not withhold `complete` waiting for a grader that is not there.)
 - READ THE FILTER FROM WHAT SURVIVES, NOT FROM ERROR TEXT. A grader message like "you triggered X" or a captured runtime error describes an OUTCOME, not the injection context. A runtime error captured as your "result" often comes from an incidental part of the payload (an attribute value, a resource URL, a quote/encoding choice), NOT from the sink -- vary those incidental parts, do not assume the sink is hooked.
 
 ---
@@ -151,6 +186,52 @@ Output lists which of `< > " ' ( ) ;` make it through unfiltered for that parame
 **Cross-reference Step 3b output with Step 3 context** before picking a payload. Don't try `<script>` if `<` is encoded.
 
 ### Step 3c: Measurement-based structural enumeration (when tags/attrs are filtered)
+
+**Step 3c.0 -- fingerprint the filter's ALPHABET before any wordlist sweep.** A stripped
+tag tells you the filter rejected *that form*; it does not tell you the *rule*. The decisive
+question is which characters the filter accepts **immediately after the injection
+metacharacter** (`<`). Do NOT sample and do NOT generalize -- run the EXHAUSTIVE
+single-character sweep and read the survivor set from the diff. Enumerating every starter is
+~62 cheap requests in ONE wave; there is nothing to reason about, so NEVER infer the rule from
+three probes:
+
+```
+for c in {{a..z}} {{A..Z}} {{0..9}} '!' '/' '?' '%' ' '; do
+  curl -s "http://TARGET/path?name=<$c" | grep -q "REJECT_MARKER" && echo "$c BLOCKED" || echo "$c SURVIVES"
+done
+```
+
+Replace `REJECT_MARKER` with the literal string the app shows on a rejected tag (read it once
+from a known-blocked probe -- never hard-code it). Any starter NOT producing that marker is a
+survivor. You MUST have every `a-z` AND `A-Z` individually on record as blocked before you are
+allowed to write down "all letters blocked" -- off-by-one range blocklists (`[a-x]`, `[b-z]`,
+`[c-z]`) do occur, and where they do the ONE surviving letter is the whole solution (this matters
+mainly when the filter is a character range/regex; keyword/tag-name blocklists and WAF regex,
+which are more common in the wild, do not behave this way). Two outcomes change everything:
+- If the reject rule is a **character range / regex** rather than a keyword list, any
+  *accepted* starter character followed by an **unknown/custom element name** slips through:
+  the browser parses `<{{accepted}}...>` as a custom element and still honors global attributes
+  (`autofocus`, `onfocus`). A standard tag-NAME wordlist can NEVER contain this form, so this
+  probe MUST run before the sweep below -- otherwise you will exhaust every real tag and
+  wrongly conclude "even custom tags are blocked."
+- A grader error or any "blocked / invalid tag"-style message is an OUTCOME, not the rule -- read which
+  literal characters survive in the RAW response, never the message text.
+
+**Boundary-first: a RANGE is a HYPOTHESIS until you find its exact cutoff.** `<a` and `<A`
+both rejecting is equally consistent with `[a-z]`, `[a-x]`, `[b-z]`, `[c-z]` and many other
+rules -- interior samples cannot tell them apart. The information lives at the EDGES, so probe
+the character at each END of the range you hypothesized plus its immediate neighbours just
+inside and just outside it (this is exactly why the probe set above spans the alphabet's START
+and END and includes non-letters). When the filter IS a character range, off-by-one boundary
+bugs are a known failure mode, and the single surviving edge character is then the ONLY accepted
+starter -- the one form a tag-NAME wordlist can never contain. Do not inflate "a few samples rejected" into
+"the whole class is closed" without testing the boundary.
+
+**A surviving bypass is a lead, not the finish line -- enumerate the FULL accepted set before
+committing.** When one character or form passes the filter, keep probing until the accepted set
+stops growing. Survivors are NOT interchangeable downstream: one may parse and fire cleanly
+while another passes the filter yet mis-parses or throws inside the grader's engine. Collect
+every survivor, then carry EACH through to the grader (Step 6) before ranking or discarding it.
 
 If common tags come back stripped, DO NOT conclude from memory that "no tags are allowed" -- a stripped payload is data about the filter, not proof the class is dead. Filters routinely blocklist the *canonical* tag NAMES (script/img/svg/iframe/body) while a browser still parses obscure equivalents. Enumerate the surviving forms by MEASUREMENT against the target, not by recall and not by a local render:
 
@@ -234,6 +315,17 @@ If dialog does NOT fire but the payload appears in HTML source -> filter is enco
 - `onload` -- fires on successful element/resource load.
 - `onfocus` + `autofocus` -- many grader bots explicitly dispatch focus to `[autofocus]`/`[onfocus]` elements; a reliable trigger when image/script vectors are filtered.
 - `ontoggle` (`<details open>`), `onanimationstart`/`ontransitionend` (CSS-driven) -- fire without user interaction and survive some filters.
+
+**Injection has TWO independent gates: (1) survive the filter, (2) parse-and-fire in the
+grader's engine.** A payload can clear gate 1 and still fail gate 2 -- mis-parsed by a legacy
+engine, or the chosen handler throws in that engine instead of firing. When a payload SURVIVES
+the filter but the grader returns an error or the wrong value instead of your marker, you have
+cleared gate 1: do NOT conclude the class is dead. Hold your injection point fixed and vary
+gate 2 -- swap the handler family across the list above and try the alternative element forms.
+Treat {{surviving injection primitives}} x {{self-firing handlers}} as a grid and sweep it; the
+solution is usually one specific CELL, not a whole row or column. The grader engine is often
+older/different from your local browser, so a handler that fires locally may throw there and
+vice-versa -- let the grader's response, not your local render, decide which cell wins.
 
 ### Step 7: WAF / filter bypass via dalfox (when manual payloads fail)
 
@@ -326,6 +418,8 @@ Look for a line containing the `.oast.fun` domain (e.g. `abc123xyz.oast.fun`).
 
 **CRITICAL:** This domain is cryptographically registered with the server. Random strings will NOT work -- you MUST use the domain printed in the log.
 
+> `oast.fun` is the DEFAULT public interactsh server. If the project configured a different OOB provider or a self-hosted interactsh, pass that host to `-server` instead. Blind XSS depends on the victim/grader browser having egress to that host -- if it never fires, that is INCONCLUSIVE (no egress / not viewed yet), not proof there is no blind XSS.
+
 ### Step 3: Inject blind XSS payloads pointing at the registered domain
 
 Generic HTML body injection:
@@ -398,6 +492,7 @@ Look up payloads by the context detected in Step 3 of the main workflow. Always 
 <details open ontoggle=alert(1)>
 <iframe srcdoc="<script>alert(1)</script>">
 <input autofocus onfocus=alert(1)>
+<xyz autofocus onfocus=alert(1)>
 <marquee onstart=alert(1)>
 <video><source onerror=alert(1)>
 ```
@@ -510,6 +605,7 @@ When a filter strips tags by NAME, the browser parser is more permissive than th
 | Case / spacing | `<ImG>`, `<SvG>`, tag with a leading control char | Case-sensitive or exact-name filters miss the variant |
 | Malformed / unclosed | `<svg onload=alert(1)<`, `<img src=x onerror=alert(1)//` | Lenient parser still builds the element; a strict regex does not match |
 | Slash-separated (no whitespace) | `<svg/onload=alert(1)>`, `<img/src=x/onerror=alert(1)>` | `/` separates attributes, so a whitespace-stripping filter can't break the tag |
+| Unknown / custom element | `<xyz autofocus onfocus=alert(1)>` — **replace the name's FIRST char with one your Step 3c.0 boundary probe PROVED survives; never copy a literal starter. Keep that char DIRECTLY after `<` — whitespace/separators after `<` bypass many filters but some engines mis-parse or throw on them, so verify any such variant end-to-end and never assume it equals a clean starter.** | Filter blocklists real tag NAMES, or a *range* of starter characters; the parser still builds any `<letter…>` as a custom element that honors global `autofocus`/`onfocus` -- no real-tag wordlist contains this form |
 
 The last row doubles as the whitespace-filter bypass: if spaces are removed from your input, join attributes with `/` instead.
 

