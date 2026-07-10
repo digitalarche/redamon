@@ -193,13 +193,15 @@ RUN pip install --no-cache-dir neo4j
 # jwt_tool - JWT exploitation toolkit (alg:none, key confusion, cracking)
 # Source: https://github.com/ticarpi/jwt_tool (GPL-3.0)
 RUN pip install --no-cache-dir pycryptodomex termcolor ratelimit \
-    && retry git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
+    && retry git clone https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
+    && git -C /opt/jwt_tool -c advice.detachedHead=false checkout 3bc7407cf2222d6a821dcc19c776e5a1b1cb9a9b \
     && chmod +x /opt/jwt_tool/jwt_tool.py \
     && ln -s /opt/jwt_tool/jwt_tool.py /usr/local/bin/jwt_tool
 
 # graphql-cop - GraphQL security auditor
 # Source: https://github.com/dolevf/graphql-cop (BSD-3-Clause)
-RUN retry git clone --depth 1 https://github.com/dolevf/graphql-cop.git /opt/graphql-cop \
+RUN retry git clone https://github.com/dolevf/graphql-cop.git /opt/graphql-cop \
+    && git -C /opt/graphql-cop -c advice.detachedHead=false checkout 2b7e086efae672f28b419c7fcdfe6b48d846c9dc \
     && pip install --no-cache-dir -r /opt/graphql-cop/requirements.txt \
     && chmod +x /opt/graphql-cop/graphql-cop.py \
     && ln -s /opt/graphql-cop/graphql-cop.py /usr/local/bin/graphql-cop
@@ -208,7 +210,8 @@ RUN retry git clone --depth 1 https://github.com/dolevf/graphql-cop.git /opt/gra
 # Source: https://github.com/swisskyrepo/GraphQLmap (MIT)
 # Note: Install via setup.py to get the 'graphqlmap' command. Skip readline
 # from requirements.txt as it fails on Python 3.13 (Linux Python has readline built-in)
-RUN retry git clone --depth 1 https://github.com/swisskyrepo/GraphQLmap.git /opt/graphqlmap \
+RUN retry git clone https://github.com/swisskyrepo/GraphQLmap.git /opt/graphqlmap \
+    && git -C /opt/graphqlmap -c advice.detachedHead=false checkout 59305d7570c8fbbb04a324e869ec9a196c150936 \
     && cd /opt/graphqlmap \
     && pip install --no-cache-dir requests \
     && pip install --no-cache-dir -e .
@@ -221,11 +224,11 @@ RUN pip install --no-cache-dir playwright \
 
 # Install SecLists wordlists for ffuf/gobuster directory fuzzing
 RUN mkdir -p /usr/share/seclists/Discovery/Web-Content && \
-    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
+    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/47c02ddb16744a80c79fe19880096868c4c90cee/Discovery/Web-Content/common.txt \
         -o /usr/share/seclists/Discovery/Web-Content/common.txt && \
-    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/raft-medium-directories.txt \
+    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/47c02ddb16744a80c79fe19880096868c4c90cee/Discovery/Web-Content/raft-medium-directories.txt \
         -o /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt && \
-    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/big.txt \
+    retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/47c02ddb16744a80c79fe19880096868c4c90cee/Discovery/Web-Content/big.txt \
         -o /usr/share/seclists/Discovery/Web-Content/big.txt
 
 # ParamSpider — passive URL parameter discovery from Wayback Machine
@@ -273,11 +276,11 @@ RUN pip install --no-cache-dir \
 # - deepce.sh:   stealthcopter/deepce Docker container escape primitive scanner
 RUN mkdir -p /opt/tools/linux \
     && retry curl -fsSL -o /opt/tools/linux/linpeas.sh \
-       https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh \
+       https://github.com/peass-ng/PEASS-ng/releases/download/20260708-abaa95f3/linpeas.sh \
     && retry curl -fsSL -o /opt/tools/linux/LinEnum.sh \
        https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh \
     && retry curl -fsSL -o /opt/tools/linux/pspy64 \
-       https://github.com/DominicBreuker/pspy/releases/latest/download/pspy64 \
+       https://github.com/DominicBreuker/pspy/releases/download/v1.2.1/pspy64 \
     && retry curl -fsSL -o /opt/tools/linux/deepce.sh \
        https://raw.githubusercontent.com/stealthcopter/deepce/main/deepce.sh \
     && chmod +x /opt/tools/linux/*
@@ -290,11 +293,11 @@ RUN mkdir -p /opt/tools/linux \
 # - PrivescCheck.ps1: itm4n/PrivescCheck audit script
 RUN mkdir -p /opt/tools/windows \
     && retry curl -fsSL -o /opt/tools/windows/winPEASx64.exe \
-       https://github.com/peass-ng/PEASS-ng/releases/latest/download/winPEASx64.exe \
+       https://github.com/peass-ng/PEASS-ng/releases/download/20260708-abaa95f3/winPEASx64.exe \
     && retry curl -fsSL -o /opt/tools/windows/PowerUp.ps1 \
        https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Privesc/PowerUp.ps1 \
     && retry curl -fsSL -o /opt/tools/windows/PrivescCheck.ps1 \
-       https://github.com/itm4n/PrivescCheck/releases/latest/download/PrivescCheck.ps1
+       https://github.com/itm4n/PrivescCheck/releases/download/2026.07.02-1/PrivescCheck.ps1
 
 # AD/post-exploitation Python tools
 # hashID: hash type identification (MD5, NTLM, bcrypt, etc) — unmaintained since 2015 but functional
@@ -309,7 +312,8 @@ RUN pip install --no-cache-dir hashID bloodhound certipy-ad ldapdomaindump \
 # gMSADumper: read gMSA passwords when BloodHound flags ReadGMSAPassword edge.
 # Not on PyPI — install from git. Source: https://github.com/micahvandeusen/gMSADumper
 # (GPL-3.0; invoked as separate-process CLI, mere aggregation)
-RUN retry git clone --depth 1 https://github.com/micahvandeusen/gMSADumper.git /opt/gMSADumper \
+RUN retry git clone https://github.com/micahvandeusen/gMSADumper.git /opt/gMSADumper \
+    && git -C /opt/gMSADumper -c advice.detachedHead=false checkout e03187ca5c2b38b8742a20b919ebe38633c0b084 \
     && pip install --no-cache-dir ldap3 pyasn1 \
     && chmod +x /opt/gMSADumper/gMSADumper.py \
     && ln -sf /opt/gMSADumper/gMSADumper.py /usr/local/bin/gMSADumper.py \
@@ -362,14 +366,15 @@ RUN apt-get update \
          ln -sf /usr/share/wordlists/rockyou.txt \
                 /usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt; \
        fi \
-    && retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10k-most-common.txt \
+    && retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/47c02ddb16744a80c79fe19880096868c4c90cee/Passwords/Common-Credentials/10k-most-common.txt \
         -o /usr/share/seclists/Passwords/Common-Credentials/10k-most-common.txt \
-    && retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/master/Usernames/xato-net-10-million-usernames.txt \
+    && retry curl -sL https://raw.githubusercontent.com/danielmiessler/SecLists/47c02ddb16744a80c79fe19880096868c4c90cee/Usernames/xato-net-10-million-usernames.txt \
         -o /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt
 
 # SSTImap — Server-Side Template Injection detection & exploitation
 # Source: https://github.com/vladko312/SSTImap (GPL-3.0; invoked as separate-process CLI, mere aggregation)
-RUN retry git clone --depth 1 https://github.com/vladko312/SSTImap.git /opt/sstimap \
+RUN retry git clone https://github.com/vladko312/SSTImap.git /opt/sstimap \
+    && git -C /opt/sstimap -c advice.detachedHead=false checkout d4f09055b15967b0e2265f20eb348a7ec2f25a2c \
     && pip install --no-cache-dir -r /opt/sstimap/requirements.txt \
     && chmod +x /opt/sstimap/sstimap.py \
     && ln -s /opt/sstimap/sstimap.py /usr/local/bin/sstimap
@@ -381,7 +386,8 @@ RUN retry git clone --depth 1 https://github.com/vladko312/SSTImap.git /opt/ssti
 # venv to avoid clashes with /opt/venv. Failures during the pinned-requirements
 # install are non-fatal: the wrapper still launches the tool with relaxed deps,
 # and the SSTI community skill documents an SSTImap-only fallback.
-RUN retry git clone --depth 1 https://github.com/epinna/tplmap.git /opt/tplmap \
+RUN retry git clone https://github.com/epinna/tplmap.git /opt/tplmap \
+    && git -C /opt/tplmap -c advice.detachedHead=false checkout 616b0e527f62dd0930e6346ede6bef79e9bcf717 \
     && python3 -m venv /opt/tplmap/venv \
     && /opt/tplmap/venv/bin/pip install --no-cache-dir requests pysocks \
        || echo "WARNING: tplmap base deps install hit issues; tplmap may be degraded" \
@@ -398,7 +404,8 @@ RUN retry git clone --depth 1 https://github.com/epinna/tplmap.git /opt/tplmap \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends php-cli \
     && rm -rf /var/lib/apt/lists/* \
-    && retry git clone --depth 1 https://github.com/ambionics/phpggc.git /opt/phpggc \
+    && retry git clone https://github.com/ambionics/phpggc.git /opt/phpggc \
+    && git -C /opt/phpggc -c advice.detachedHead=false checkout f8aebde3a1abb88b02042fd12a71b4c61d6cfe2c \
     && chmod +x /opt/phpggc/phpggc \
     && ln -s /opt/phpggc/phpggc /usr/local/bin/phpggc
 

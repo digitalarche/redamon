@@ -15,7 +15,8 @@ PySocks>=1.7.1               # SOCKS proxy support for Tor
 PyGithub>=2.1.1              # GitHub API client
 
 # Subdomain discovery
-knock-subdomains @ git+https://github.com/guelfoweb/knock.git
+# T17: pinned to an immutable commit (was the mutable default-branch HEAD).
+knock-subdomains @ git+https://github.com/guelfoweb/knock.git@da43fdd2399f9ca5a39229cb8ba3e51249f53e30
 
 # Environment configuration
 python-dotenv>=1.0.0         # Load .env files
@@ -29,7 +30,7 @@ neo4j>=5.0.0                 # Neo4j graph database driver
 
 # HTTP parameter discovery
 arjun>=2.2.7                 # Hidden parameter discovery
-paramspider @ git+https://github.com/devanshbatham/ParamSpider.git  # Passive URL parameter mining from Wayback Machine
+paramspider @ git+https://github.com/devanshbatham/ParamSpider.git@c44bdaae54789b237028e309b603d1aa5ad52e5e  # T17: pinned commit. Passive URL parameter mining from Wayback Machine
 
 # MITRE enrichment
 # (uses requests - already included above)
