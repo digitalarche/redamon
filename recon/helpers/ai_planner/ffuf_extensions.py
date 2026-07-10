@@ -19,6 +19,8 @@ from typing import Dict, List, Optional
 
 import requests
 
+from recon.helpers.ai_planner import internal_key_headers
+
 SAFE_FALLBACK = ['.bak', '.old', '.config', '.zip']
 EXT_REGEX = re.compile(r'^\.[a-z0-9]{1,8}$')
 FINGERPRINT_HEADERS = ('Server', 'X-Powered-By', 'X-AspNet-Version', 'X-AspNetMvc-Version')
@@ -104,7 +106,7 @@ def get_ai_extensions(
     print(f"[*][FFuf-AI] Calling agent {endpoint} with model={model}")
 
     try:
-        resp = requests.post(endpoint, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(endpoint, json=payload, headers=internal_key_headers(), timeout=LLM_TIMEOUT)
     except requests.RequestException as e:
         print(f"[!][FFuf-AI] Agent request failed: {e}. Using safe fallback.")
         return SAFE_FALLBACK[:max_extensions]

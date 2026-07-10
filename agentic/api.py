@@ -21,12 +21,13 @@ from typing import Optional
 
 import httpx
 import websockets
-from fastapi import FastAPI, File, Form, Query, UploadFile, WebSocket
+from fastapi import Depends, FastAPI, File, Form, Query, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel
 
+from llm_guard import require_internal_auth
 from logging_config import setup_logging
 from orchestrator import AgentOrchestrator
 from orchestrator_helpers import normalize_content
@@ -160,7 +161,7 @@ class GuardrailRequest(BaseModel):
     user_id: str = ""
 
 
-@app.post("/guardrail/check-target", tags=["Guardrail"])
+@app.post("/guardrail/check-target", tags=["Guardrail"], dependencies=[Depends(require_internal_auth)])
 async def check_target_guardrail(body: GuardrailRequest):
     """
     Check if a target domain or IP list is safe to scan.
@@ -348,7 +349,7 @@ RoE Document:
 ---"""
 
 
-@app.post("/roe/parse", tags=["RoE"])
+@app.post("/roe/parse", tags=["RoE"], dependencies=[Depends(require_internal_auth)])
 async def parse_roe_document(body: RoeParseRequest):
     """Parse a Rules of Engagement document using the LLM and extract structured settings."""
     import json as json_mod
@@ -538,7 +539,7 @@ def _build_llm_with_model_for_user(model_name: str, user_id: Optional[str]):
     )
 
 
-@app.post("/llm/ffuf-extensions", tags=["LLM"])
+@app.post("/llm/ffuf-extensions", tags=["LLM"], dependencies=[Depends(require_internal_auth)])
 async def llm_ffuf_extensions(body: FfufExtensionsRequest):
     """Suggest FFuf file extensions for a target based on its response headers.
 
@@ -636,7 +637,7 @@ Respond with ONLY a JSON object of this exact shape, no prose:
 {"tags": ["tag1", "tag2", ...]}"""
 
 
-@app.post("/llm/nuclei-tags", tags=["LLM"])
+@app.post("/llm/nuclei-tags", tags=["LLM"], dependencies=[Depends(require_internal_auth)])
 async def llm_nuclei_tags(body: NucleiTagsRequest):
     """Suggest Nuclei tags for a vuln scan based on tech fingerprint.
 
@@ -748,7 +749,7 @@ Respond with ONLY a JSON object of this exact shape, no prose:
 {"waf_detected": true|false, "waf_type": "cloudflare"|null, "confidence": 0..100, "reasoning": "..."}"""
 
 
-@app.post("/llm/waf-classify", tags=["LLM"])
+@app.post("/llm/waf-classify", tags=["LLM"], dependencies=[Depends(require_internal_auth)])
 async def llm_waf_classify(body: WafClassifyRequest):
     """Classify whether a response came through a WAF/CDN.
 
@@ -874,7 +875,7 @@ Respond with ONLY a JSON object of this exact shape, no prose:
 {"is_blocked": true|false, "confidence": 0..100, "reason": "..."}"""
 
 
-@app.post("/llm/nuclei-fp-filter", tags=["LLM"])
+@app.post("/llm/nuclei-fp-filter", tags=["LLM"], dependencies=[Depends(require_internal_auth)])
 async def llm_nuclei_fp_filter(body: NucleiFpFilterRequest):
     """Classify whether a Nuclei response is a WAF/rate-limit block page
     rather than a real vulnerability hit.
@@ -1008,7 +1009,7 @@ Respond with ONLY a JSON object of this exact shape, no prose:
 {"is_waf_block": true|false, "confidence": 0..100, "reason": "..."}"""
 
 
-@app.post("/llm/takeover-classify", tags=["LLM"])
+@app.post("/llm/takeover-classify", tags=["LLM"], dependencies=[Depends(require_internal_auth)])
 async def llm_takeover_classify(body: TakeoverClassifyRequest):
     """Disambiguate a takeover finding from a WAF block masquerading as one.
 
@@ -1688,7 +1689,7 @@ class ModelsRequest(BaseModel):
     providers: list[dict] | None = None
 
 
-@app.post("/models", tags=["System"])
+@app.post("/models", tags=["System"], dependencies=[Depends(require_internal_auth)])
 async def get_models(body: ModelsRequest | None = None):
     """
     Fetch available AI models from all configured providers.
@@ -1794,7 +1795,7 @@ class LlmProviderTestRequest(BaseModel):
     awsBearerToken: str = ""
 
 
-@app.post("/llm-provider/test", tags=["System"])
+@app.post("/llm-provider/test", tags=["System"], dependencies=[Depends(require_internal_auth)])
 async def test_llm_provider(body: LlmProviderTestRequest):
     """Test an LLM provider config by sending a simple message."""
     from orchestrator_helpers.llm_setup import setup_llm

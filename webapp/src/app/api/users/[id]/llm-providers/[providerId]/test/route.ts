@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Proxy to agent test endpoint
     const agentResp = await fetch(`${AGENT_API_URL}/llm-provider/test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(config),
     })
 

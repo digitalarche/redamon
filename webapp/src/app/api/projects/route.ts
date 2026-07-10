@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 import { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
 import { getGraphSession } from '@/app/api/graph/neo4j'
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
       try {
         const guardrailResponse = await fetch(`${AGENT_API_URL}/guardrail/check-target`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             target_domain: ipMode ? '' : (targetDomain || ''),
             target_ips: ipMode ? (optionalParams.targetIps || []) : [],

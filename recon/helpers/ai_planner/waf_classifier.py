@@ -26,6 +26,8 @@ from typing import Dict, Optional
 
 import requests
 
+from recon.helpers.ai_planner import internal_key_headers
+
 # Returned on any failure (network, auth, schema, validation). Keeps the call
 # graph defensive: callers always get a usable dict.
 SAFE_FALLBACK: Dict = {
@@ -156,7 +158,7 @@ def classify_waf(
     print(f"[*][WAF-AI] Calling agent {endpoint} with model={model} (status={response.status_code}, body={len(body_sample)}B)")
 
     try:
-        resp = requests.post(endpoint, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(endpoint, json=payload, headers=internal_key_headers(), timeout=LLM_TIMEOUT)
     except requests.RequestException as e:
         print(f"[!][WAF-AI] Agent request failed: {e}. Using safe fallback.")
         return dict(SAFE_FALLBACK)

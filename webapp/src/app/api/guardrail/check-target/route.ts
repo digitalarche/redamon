@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8080'
 
@@ -8,7 +9,7 @@ export async function POST(request: NextRequest) {
 
     const response = await fetch(`${AGENT_API_URL}/guardrail/check-target`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         target_domain: body.targetDomain || '',
         target_ips: body.targetIps || [],

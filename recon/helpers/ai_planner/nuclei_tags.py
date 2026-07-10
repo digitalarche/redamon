@@ -20,6 +20,8 @@ from typing import Dict, List, Optional
 
 import requests
 
+from recon.helpers.ai_planner import internal_key_headers
+
 TEMPLATES_STATS_PATH = '/opt/nuclei-templates-official/TEMPLATES-STATS.json'
 MIN_TEMPLATE_COUNT = 50
 
@@ -146,7 +148,7 @@ def get_ai_tags(
     print(f"[*][Nuclei-AI] Calling agent {endpoint} with model={model} ({len(payload['technologies'])} techs, {len(payload['servers'])} servers, {len(candidates)} candidates)")
 
     try:
-        resp = requests.post(endpoint, json=payload, timeout=LLM_TIMEOUT)
+        resp = requests.post(endpoint, json=payload, headers=internal_key_headers(), timeout=LLM_TIMEOUT)
     except requests.RequestException as e:
         print(f"[!][Nuclei-AI] Agent request failed: {e}. Using current tags as fallback.")
         return current_tags

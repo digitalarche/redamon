@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 import prisma from '@/lib/prisma'
 import { requireEffectiveUser } from '@/lib/access'
 
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     const res = await fetch(`${AGENT_API_URL}/models`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ providers: providers.length > 0 ? providers : null }),
       cache: 'no-store',
     })
