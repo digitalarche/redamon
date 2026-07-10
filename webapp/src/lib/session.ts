@@ -88,6 +88,22 @@ export function isInternalRequest(request: NextRequest): boolean {
 }
 
 /**
+ * S3/E6: the LOWER-TIER scanner principal. Scan containers carry SCANNER_API_KEY
+ * (not the master INTERNAL_API_KEY) and legitimately read only their OSINT
+ * settings + project config. This returns true for a valid scanner key; callers
+ * must scope it to exactly GET /api/users/[id]/settings and GET /api/projects/[id]
+ * (the middleware allowlist enforces the route scope; these route handlers accept
+ * the principal). It is deliberately NOT accepted on llm-providers, tradecraft,
+ * or any user-CRUD route.
+ */
+export function isScannerRequest(request: NextRequest): boolean {
+  const key = request.headers.get('x-internal-key')
+  const expected = process.env.SCANNER_API_KEY
+  if (!key || !expected || expected === 'changeme') return false
+  return constantTimeEqual(key, expected)
+}
+
+/**
  * Ownership gate for user-scoped secret/data routes (settings, llm-providers,
  * tradecraft). Internal-key callers (the agent + scanners) pass through; every
  * other caller must have a session and either own `targetUserId` or be an admin.

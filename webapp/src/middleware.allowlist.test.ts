@@ -4,7 +4,7 @@
  * @vitest-environment node
  */
 import { describe, test, expect } from 'vitest'
-import { internalKeyRouteAllowed } from './middleware'
+import { internalKeyRouteAllowed, scannerKeyRouteAllowed } from './middleware'
 
 describe('internalKeyRouteAllowed — enumerated internal routes pass', () => {
   test.each([
@@ -36,5 +36,27 @@ describe('internalKeyRouteAllowed — off-allowlist routes are NOT allowed', () 
     ['GET', '/api/projects'],                      // projects LIST (only /[id] allowed)
   ])('%s %s → NOT allowed', (method, path) => {
     expect(internalKeyRouteAllowed(method, path)).toBe(false)
+  })
+})
+
+describe('scannerKeyRouteAllowed — S3/E6 scoped scanner token', () => {
+  test.each([
+    ['GET', '/api/users/abc/settings'],   // OSINT keys recon needs
+    ['GET', '/api/projects/p1'],          // project config
+  ])('%s %s → allowed for scanner', (method, path) => {
+    expect(scannerKeyRouteAllowed(method, path)).toBe(true)
+  })
+
+  test.each([
+    ['GET', '/api/users/abc/llm-providers'],       // key harvest — MUST be blocked
+    ['GET', '/api/users/abc/tradecraft-resources'],
+    ['POST', '/api/users'],                        // mint-admin — MUST be blocked
+    ['PUT', '/api/users/abc'],
+    ['POST', '/api/internal/codefix-sandbox/j/exec'],
+    ['POST', '/api/remediations'],
+    ['GET', '/api/global/tunnel-config'],
+    ['POST', '/api/users/abc/settings'],           // scanner is GET-only
+  ])('%s %s → NOT allowed for scanner', (method, path) => {
+    expect(scannerKeyRouteAllowed(method, path)).toBe(false)
   })
 })

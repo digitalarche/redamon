@@ -486,6 +486,13 @@ ensure_auth_secrets() {
         echo "INTERNAL_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
         info "Generated INTERNAL_API_KEY"
     fi
+    # S3/E6: least-privilege token injected into scan containers INSTEAD of the
+    # master INTERNAL_API_KEY. Scoped (webapp) to settings/projects GET + agent
+    # /llm/*; cannot mint admins or harvest LLM-provider keys.
+    if ! grep -q '^SCANNER_API_KEY=' "$env_file" 2>/dev/null; then
+        echo "SCANNER_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
+        info "Generated SCANNER_API_KEY"
+    fi
     if ! grep -q '^ORCHESTRATOR_API_KEY=' "$env_file" 2>/dev/null; then
         echo "ORCHESTRATOR_API_KEY=$(openssl rand -hex 32)" >> "$env_file"
         info "Generated ORCHESTRATOR_API_KEY"

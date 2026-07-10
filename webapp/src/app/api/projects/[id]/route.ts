@@ -6,7 +6,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { getGraphSession } from '@/app/api/graph/neo4j'
 import { orchestratorFetch } from '@/lib/orchestrator'
-import { isInternalRequest } from '@/lib/session'
+import { isInternalRequest, isScannerRequest } from '@/lib/session'
 import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 // Path to output directories (fallback for local deletion)
@@ -26,11 +26,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
 
-    // Ownership: the agent/orchestrator/scanners read projects with X-Internal-Key
-    // (carve-out); every browser caller may only read a project owned by their
-    // effective user (admin only while simulating that user). Closes the BOLA where
-    // any logged-in user could read another user's project by id (S15/E15).
-    if (!isInternalRequest(request)) {
+    // Ownership: the agent/orchestrator (INTERNAL_API_KEY) and scanners
+    // (SCANNER_API_KEY, S3/E6) read projects with X-Internal-Key (carve-out);
+    // every browser caller may only read a project owned by their effective user
+    // (admin only while simulating that user). Closes the BOLA where any
+    // logged-in user could read another user's project by id (S15/E15).
+    if (!isInternalRequest(request) && !isScannerRequest(request)) {
       const eff = await requireEffectiveUser()
       if (eff instanceof NextResponse) return eff
       const access = await requireProjectAccess(eff, id)

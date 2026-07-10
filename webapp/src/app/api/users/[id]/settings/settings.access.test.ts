@@ -30,6 +30,7 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/session', () => ({
   requireUserAccess: (...a: unknown[]) => mockRequireUserAccess(...a),
   isInternalRequest: (...a: unknown[]) => mockIsInternal(...a),
+  isScannerRequest: () => false,  // S3/E6: browser/agent cases are not scanners
 }))
 
 import { GET } from './route'

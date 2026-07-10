@@ -33,6 +33,21 @@ export function internalKeyRouteAllowed(method: string, pathname: string): boole
   )
 }
 
+// S3/E6: the scanner token is a strict SUBSET — only the two GET routes recon
+// legitimately reads (its OSINT settings + project config). Excluded from
+// llm-providers, tradecraft, and all user-CRUD. Enforced directly (SCANNER_API_KEY
+// is a brand-new principal with no legacy callers, so there is nothing to break).
+const SCANNER_ALLOWLIST: { method: string; pattern: RegExp }[] = [
+  { method: 'GET', pattern: /^\/api\/users\/[^/]+\/settings$/ },
+  { method: 'GET', pattern: /^\/api\/projects\/[^/]+$/ },
+]
+
+export function scannerKeyRouteAllowed(method: string, pathname: string): boolean {
+  return SCANNER_ALLOWLIST.some(
+    (a) => (a.method === 'ANY' || a.method === method) && a.pattern.test(pathname),
+  )
+}
+
 function getSecret() {
   const secret = process.env.AUTH_SECRET
   if (!secret || secret === 'changeme') return null
@@ -86,6 +101,17 @@ export async function middleware(request: NextRequest) {
       console.warn(`[internal-key] off-allowlist ${request.method} ${pathname} (log-only; set INTERNAL_KEY_ALLOWLIST_ENFORCE=true to block)`)
       return NextResponse.next()
     }
+  }
+
+  // S3/E6: the scoped scanner token. Accepted ONLY on its two GET routes;
+  // any other route with the scanner key falls through to JWT (401 for a
+  // service). Enforced directly — no legacy callers hold this new token.
+  const scannerKey = process.env.SCANNER_API_KEY
+  if (internalKey && scannerKey && scannerKey !== 'changeme' && constantTimeEqual(internalKey, scannerKey)) {
+    if (scannerKeyRouteAllowed(request.method, pathname)) {
+      return NextResponse.next()
+    }
+    console.warn(`[scanner-key] BLOCKED out-of-scope ${request.method} ${pathname}`)
   }
 
   // Check JWT cookie

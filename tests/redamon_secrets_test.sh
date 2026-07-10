@@ -36,11 +36,16 @@ assert_true  "AUTH_SECRET still generated"        "grep -qE '^AUTH_SECRET=[0-9a-
 # STRIDE S6 + I19: the WS-ticket signing secret and tunnel auth token.
 assert_true  "AGENT_WS_TICKET_SECRET generated (64 hex)" "grep -qE '^AGENT_WS_TICKET_SECRET=[0-9a-f]{64}\$' '$TMP/.env'"
 assert_true  "TUNNEL_AUTH_TOKEN generated (64 hex)"      "grep -qE '^TUNNEL_AUTH_TOKEN=[0-9a-f]{64}\$' '$TMP/.env'"
+# STRIDE S3/E6: the scoped scanner token.
+assert_true  "SCANNER_API_KEY generated (64 hex)"        "grep -qE '^SCANNER_API_KEY=[0-9a-f]{64}\$' '$TMP/.env'"
+# S3/E6: it must be DISTINCT from the master INTERNAL_API_KEY (the whole point).
+assert_true  "SCANNER_API_KEY != INTERNAL_API_KEY" "[ \"\$(sed -n 's/^SCANNER_API_KEY=//p' '$TMP/.env')\" != \"\$(sed -n 's/^INTERNAL_API_KEY=//p' '$TMP/.env')\" ]"
 # Idempotency: second call must not duplicate.
 ensure_auth_secrets >/dev/null 2>&1
 assert_eq    "MCP_AUTH_TOKEN not duplicated" "$(grep -c '^MCP_AUTH_TOKEN=' "$TMP/.env")" "1"
 assert_eq    "AGENT_WS_TICKET_SECRET not duplicated" "$(grep -c '^AGENT_WS_TICKET_SECRET=' "$TMP/.env")" "1"
 assert_eq    "TUNNEL_AUTH_TOKEN not duplicated" "$(grep -c '^TUNNEL_AUTH_TOKEN=' "$TMP/.env")" "1"
+assert_eq    "SCANNER_API_KEY not duplicated" "$(grep -c '^SCANNER_API_KEY=' "$TMP/.env")" "1"
 rm -rf "$TMP"
 
 echo "== ensure_db_secrets: FRESH install (no data volume) =="

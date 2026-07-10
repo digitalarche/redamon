@@ -412,6 +412,7 @@ services:
       CODEFIX_SANDBOX_NETWORK: redamon-codefix-net
       # Auth (forwarded to spawned containers)
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
+      SCANNER_API_KEY: ${SCANNER_API_KEY:-changeme}  # S3/E6 scoped scanner token
       # Inbound API auth: the orchestrator validates this on every request (except
       # /health). Shared ONLY with the webapp — deliberately NOT forwarded to the
       # spawned recon/scan containers, so a compromised recon container (which does
@@ -626,6 +627,7 @@ services:
       # Webapp API (internal docker network)
       WEBAPP_API_URL: http://webapp:3000
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
+      SCANNER_API_KEY: ${SCANNER_API_KEY:-changeme}  # S3/E6 scoped scanner token
       # Knowledge Base
       KB_ENABLED: "${KB_ENABLED:-false}"
       KB_PATH: /app/knowledge_base/data
@@ -787,6 +789,7 @@ services:
       # Auth
       AUTH_SECRET: ${AUTH_SECRET:-changeme}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
+      SCANNER_API_KEY: ${SCANNER_API_KEY:-changeme}  # S3/E6 scoped scanner token
       # Signs short-lived agent-WebSocket tickets the agent verifies (STRIDE S6).
       # Dedicated secret (NOT AUTH_SECRET) so agent-side exposure can't forge
       # login cookies. Empty in dev → no ticket minted, agent fails open.

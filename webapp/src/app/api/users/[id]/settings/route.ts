@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { isInternalRequest, requireUserAccess } from '@/lib/session'
+import { isInternalRequest, isScannerRequest, requireUserAccess } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -24,9 +24,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // account (or be admin) and NEVER receive unmasked secrets; unmasking is
     // gated on a valid X-Internal-Key header (the agent/scanners), not the
     // client-supplied ?internal=true query param.
-    const denied = await requireUserAccess(request, id)
+    // S3/E6: the scoped scanner token reads its OSINT settings here (recon needs
+    // Shodan/URLScan keys). It is accepted like the internal principal on THIS
+    // route only (middleware enforces the route scope) and gets unmasked values.
+    const scanner = isScannerRequest(request)
+    const denied = scanner ? null : await requireUserAccess(request, id)
     if (denied) return denied
-    const internal = isInternalRequest(request) && request.nextUrl.searchParams.get('internal') === 'true'
+    const internal = (isInternalRequest(request) || scanner) && request.nextUrl.searchParams.get('internal') === 'true'
 
     let settings = await prisma.userSettings.findUnique({
       where: { userId: id },
