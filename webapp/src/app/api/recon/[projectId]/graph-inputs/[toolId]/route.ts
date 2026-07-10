@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 interface RouteParams {
   params: Promise<{ projectId: string; toolId: string }>
@@ -9,6 +10,8 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId, toolId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
 
     // Get project to know user_id and fallback domain
     const project = await prisma.project.findUnique({
@@ -23,7 +26,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Query Neo4j directly for graph inputs
     if (toolId === 'SubdomainDiscovery') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -52,7 +55,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Naabu' || toolId === 'Masscan') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -88,7 +91,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Nmap') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -127,7 +130,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Katana') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -161,7 +164,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'ZapAjaxSpider') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -198,7 +201,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Hakrawler') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -232,7 +235,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Jsluice') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -266,7 +269,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'JsRecon') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -304,7 +307,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Gau') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -336,7 +339,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'ParamSpider') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -368,7 +371,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Arjun') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -405,7 +408,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'EndpointAiClassifier') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -445,7 +448,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Ffuf') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -479,7 +482,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Kiterunner') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -513,7 +516,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'SecurityChecks') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -555,7 +558,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Httpx') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -601,7 +604,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Nuclei') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -641,7 +644,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'GraphqlScan') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -682,7 +685,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'WebCachePoison') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -720,7 +723,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Shodan') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -756,7 +759,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Urlscan') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -785,7 +788,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'Uncover') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -814,7 +817,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'OsintEnrichment') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -850,7 +853,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'VhostSni') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -900,7 +903,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'SubdomainTakeover') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})
@@ -937,7 +940,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     else if (toolId === 'AiSurfaceRecon') {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           const result = await session.run(
             `OPTIONAL MATCH (d:Domain {user_id: $uid, project_id: $pid})

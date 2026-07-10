@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || process.env.NEXT_PUBLIC_AGENT_API_URL || 'http://localhost:8080'
 
@@ -13,6 +14,8 @@ export async function POST(request: NextRequest) {
   if (!body.projectId || !body.path || !body.newName) {
     return NextResponse.json({ error: 'projectId, path, newName required' }, { status: 400 })
   }
+  const __denied = await guardProject(body.projectId || '')
+  if (__denied) return __denied
 
   try {
     const resp = await fetch(`${AGENT_API_URL}/workspace/rename`, {

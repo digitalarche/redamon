@@ -4,8 +4,10 @@ import type { Prisma } from '@prisma/client'
 import { unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import { orchestratorFetch } from '@/lib/orchestrator'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 // Path to output directories (fallback for local deletion)
 const RECON_OUTPUT_PATH = process.env.RECON_OUTPUT_PATH || '/home/samuele/Progetti didattici/RedAmon/recon/output'
@@ -23,6 +25,17 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    // Ownership: the agent/orchestrator/scanners read projects with X-Internal-Key
+    // (carve-out); every browser caller may only read a project owned by their
+    // effective user (admin only while simulating that user). Closes the BOLA where
+    // any logged-in user could read another user's project by id (S15/E15).
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const access = await requireProjectAccess(eff, id)
+      if (access instanceof NextResponse) return access
+    }
 
     const project = await prisma.project.findUnique({
       where: { id },
@@ -98,6 +111,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    // Only the project's effective owner may mutate it (admin while simulating).
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
+
     const body = await request.json()
 
     // Remove fields that shouldn't be updated directly
@@ -172,7 +192,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     // Ensure Domain node exists in Neo4j (create if missing, update if domain changed)
     if (!project.ipMode && project.targetDomain) {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           await session.run(
             `MERGE (d:Domain {name: $name, user_id: $userId, project_id: $projectId})
@@ -208,9 +228,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 // DELETE /api/projects/[id] - Delete project and all associated data
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    // Only the project's effective owner may delete it (admin while simulating).
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
 
     // 1. Delete project from PostgreSQL
     await prisma.project.delete({
@@ -252,7 +278,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
 
     // 3. Delete all Neo4j nodes for this project
     try {
-      const session = getSession()
+      const session = getGraphSession()
       try {
         // Delete all nodes that belong to this project (DETACH DELETE removes relationships too)
         await session.run(

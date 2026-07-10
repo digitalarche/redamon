@@ -4,7 +4,7 @@
  */
 
 import prisma from '@/lib/prisma'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import type { Project, Remediation } from '@prisma/client'
 import { corroborateAttackFindings } from './aiAttackFindings'
 import type { AiAttackFindingRecord, RawAttackRow } from './aiAttackFindings'
@@ -19,7 +19,7 @@ function toNum(val: unknown): number {
 /** Run a query function with its own Neo4j session, auto-closing when done. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function withSession<T>(fn: (session: any) => Promise<T>): Promise<T> {
-  const session = getSession()
+  const session = getGraphSession()
   try {
     return await fn(session)
   } finally {
@@ -606,7 +606,7 @@ export async function gatherReportData(projectId: string): Promise<ReportData> {
           // Count ChainFinding rows in Neo4j by (fireteam_id, source_agent)
           // and use those as authoritative per-member findings.
           const ftKeys = ftRows.map(f => f.fireteamIdKey)
-          const ftSession = getSession()
+          const ftSession = getGraphSession()
           let authoritativeCounts: Map<string, number> = new Map()
           try {
             const ftFindingsRes = await ftSession.run(

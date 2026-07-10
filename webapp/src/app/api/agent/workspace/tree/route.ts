@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || process.env.NEXT_PUBLIC_AGENT_API_URL || 'http://localhost:8080'
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   const path = request.nextUrl.searchParams.get('path') ?? '.'
   const maxDepth = request.nextUrl.searchParams.get('maxDepth') ?? '3'
   const maxEntries = request.nextUrl.searchParams.get('maxEntries') ?? '500'

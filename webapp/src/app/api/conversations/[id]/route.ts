@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { getSession } from '../../graph/neo4j'
+import { getGraphSession } from '../../graph/neo4j'
+import { requireEffectiveUser, requireConversationAccess } from '@/lib/access'
 
 // GET /api/conversations/[id] - Get conversation with all messages
 export async function GET(
@@ -9,6 +10,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const guard = await requireConversationAccess(eff, id)
+    if (guard instanceof NextResponse) return guard
 
     const conversation = await prisma.conversation.findUnique({
       where: { id },
@@ -43,6 +49,12 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const guard = await requireConversationAccess(eff, id)
+    if (guard instanceof NextResponse) return guard
+
     const body = await request.json()
 
     const allowedFields = ['title', 'status', 'agentRunning', 'currentPhase', 'iterationCount', 'activeSkillId']
@@ -76,6 +88,11 @@ export async function DELETE(
   try {
     const { id } = await params
 
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const guard = await requireConversationAccess(eff, id)
+    if (guard instanceof NextResponse) return guard
+
     // Fetch conversation to get sessionId (= chain_id in Neo4j)
     const conversation = await prisma.conversation.findUnique({
       where: { id },
@@ -108,7 +125,7 @@ export async function DELETE(
 
     // Delete attack chain nodes from Neo4j (fire-and-forget — don't block on failure)
     try {
-      const neo4jSession = getSession()
+      const neo4jSession = getGraphSession()
       try {
         await neo4jSession.run(
           `MATCH (n)

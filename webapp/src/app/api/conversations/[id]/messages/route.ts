@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser, requireConversationAccess } from '@/lib/access'
 
 // POST /api/conversations/[id]/messages - Append messages
 export async function POST(
@@ -8,6 +9,12 @@ export async function POST(
 ) {
   try {
     const { id: conversationId } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const guard = await requireConversationAccess(eff, conversationId)
+    if (guard instanceof NextResponse) return guard
+
     const body = await request.json()
 
     // Support single or batch messages

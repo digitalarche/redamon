@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
 import { mkdir, readdir, stat, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
@@ -33,6 +34,8 @@ function sanitizeFilename(name: string): string {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
     if (!PROJECT_ID_RE.test(projectId)) {
       return NextResponse.json({ error: 'Invalid project ID' }, { status: 400 })
     }
@@ -86,6 +89,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
     if (!PROJECT_ID_RE.test(projectId)) {
       return NextResponse.json({ error: 'Invalid project ID' }, { status: 400 })
     }
@@ -174,6 +179,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
     const fileType = request.nextUrl.searchParams.get('type')
 
     if (!fileType || !FILE_TYPE_MAP[fileType]) {

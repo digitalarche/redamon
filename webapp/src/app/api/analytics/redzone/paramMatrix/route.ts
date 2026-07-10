@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 function toNum(val: unknown): number {
   if (val && typeof val === 'object' && 'low' in val) return (val as { low: number }).low
@@ -8,11 +9,13 @@ function toNum(val: unknown): number {
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     // Row = one (Parameter) that is either flagged injectable, OR reached by a DAST Vulnerability
     // via AFFECTS_PARAMETER. Join back to Endpoint + BaseURL + Subdomain for context.

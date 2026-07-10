@@ -25,6 +25,13 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+// Ownership is covered in the dedicated auth test; stub the guard open so these
+// tests stay focused on the llmModel / field-strip behavior.
+vi.mock('@/lib/session', () => ({
+  requireUserAccess: vi.fn().mockResolvedValue(null),
+  isInternalRequest: vi.fn().mockReturnValue(false),
+}))
+
 import { NextRequest } from 'next/server'
 import * as route from './route'
 

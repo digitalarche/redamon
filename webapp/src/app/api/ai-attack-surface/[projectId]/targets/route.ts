@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 interface RouteParams {
   params: Promise<{ projectId: string }>
@@ -10,7 +11,9 @@ interface RouteParams {
 // enriched with the context the request template is built from (§2.3).
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
-  const session = getSession()
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
+  const session = getGraphSession()
   try {
     const res = await session.run(
       `MATCH (e:Endpoint {project_id: $pid})

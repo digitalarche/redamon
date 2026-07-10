@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || process.env.NEXT_PUBLIC_AGENT_API_URL || 'http://localhost:8080'
 
@@ -8,6 +9,8 @@ export async function POST(
 ) {
   const { jobId } = await params
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
 
   if (!projectId) {
     return NextResponse.json({ error: 'projectId required' }, { status: 400 })

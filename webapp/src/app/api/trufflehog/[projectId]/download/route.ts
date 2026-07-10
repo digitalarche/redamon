@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
@@ -14,6 +15,8 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
 
     // Verify project exists
     const project = await prisma.project.findUnique({
@@ -66,6 +69,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function HEAD(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
 
     // Verify project exists
     const project = await prisma.project.findUnique({

@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser } from '@/lib/access'
 
-/** GET /api/reports — List all reports across ALL projects */
+/** GET /api/reports — List the effective user's reports (scoped by project owner). */
 export async function GET() {
   try {
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+
     const reports = await prisma.report.findMany({
+      where: { project: { userId: eff.userId } },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,

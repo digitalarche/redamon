@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || process.env.NEXT_PUBLIC_AGENT_API_URL || 'http://localhost:8080'
 
 export async function GET(request: NextRequest) {
   const path = request.nextUrl.searchParams.get('path')
   const projectId = request.nextUrl.searchParams.get('projectId')
+  // projectId is optional here: when present we enforce project ownership; when
+  // absent this is the legacy /tmp-only in-chat download flow (session-gated by
+  // middleware), which has no project to scope to.
+  if (projectId) {
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
+  }
 
   if (!path) {
     return NextResponse.json({ error: 'Missing path parameter' }, { status: 400 })

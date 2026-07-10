@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
@@ -8,6 +9,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, projectId)
+    if (access instanceof NextResponse) return access
+
     const views = await prisma.graphView.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' },
@@ -33,6 +39,11 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, projectId)
+    if (access instanceof NextResponse) return access
 
     const view = await prisma.graphView.create({
       data: {

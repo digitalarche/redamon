@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
+import { requireEffectiveUser } from '@/lib/access'
 import JSZip from 'jszip'
 import { randomUUID } from 'crypto'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -102,16 +103,12 @@ interface ExportedRelationship {
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get('userId')
-    if (!userId) {
-      return NextResponse.json({ error: 'userId query parameter is required' }, { status: 400 })
-    }
-
-    // Verify user exists
-    const user = await prisma.user.findUnique({ where: { id: userId } })
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
+    // The imported project is created under the caller's EFFECTIVE user; the
+    // client-supplied ?userId is ignored so a caller cannot import a project into
+    // another user's account.
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const userId = eff.userId
 
     // Parse uploaded ZIP
     const formData = await request.formData()
@@ -299,7 +296,7 @@ export async function POST(request: NextRequest) {
         : []
 
       if (nodes.length > 0) {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           // Clear any existing data for the new project ID (safety)
           await session.run(

@@ -1,14 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireConversationAccessBySession } from '@/lib/access'
 
 // PATCH /api/conversations/by-session/[sessionId]/fireteams/[fireteamIdKey]/members/[memberIdKey]
-// Update a fireteam member's final state. Called by agent when the member exits.
+// Update a fireteam member's final state. Called by the agent (carve-out); browser
+// callers must own the session.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string; fireteamIdKey: string; memberIdKey: string }> }
 ) {
   try {
-    const { memberIdKey } = await params
+    const { sessionId, memberIdKey } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
+
     const body = await request.json()
     const updates: Record<string, unknown> = {}
 

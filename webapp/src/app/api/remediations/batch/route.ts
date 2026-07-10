@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
-// POST /api/remediations/batch - Batch create remediations (triage agent)
+// POST /api/remediations/batch - Batch create remediations (triage agent via
+// X-Internal-Key carve-out; browser callers must own the project).
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -12,6 +15,13 @@ export async function POST(request: NextRequest) {
         { error: 'projectId and non-empty remediations array are required' },
         { status: 400 }
       )
+    }
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const access = await requireProjectAccess(eff, projectId)
+      if (access instanceof NextResponse) return access
     }
 
     // Delete existing pending remediations for this project (re-triage replaces them)

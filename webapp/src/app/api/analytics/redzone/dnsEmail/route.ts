@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import {
   extractSpfRecord,
   isSpfStrict,
@@ -25,11 +26,13 @@ const DNS_VULN_TYPES = [
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     // DNS records attach to Subdomain (not Domain) in domain_mixin.
     // For the apex Domain's DNS records, find the Subdomain with the same name as the Domain.

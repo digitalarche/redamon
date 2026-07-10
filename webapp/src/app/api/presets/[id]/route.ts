@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser, assertOwner } from '@/lib/access'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -9,6 +10,9 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
 
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+
     const preset = await prisma.userProjectPreset.findUnique({
       where: { id },
     })
@@ -16,6 +20,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     if (!preset) {
       return NextResponse.json({ error: 'Preset not found' }, { status: 404 })
     }
+    const denied = assertOwner(eff, preset.userId)
+    if (denied) return denied
 
     return NextResponse.json(preset)
   } catch (error) {
@@ -27,14 +33,12 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
-    const userId = request.nextUrl.searchParams.get('userId')
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 })
-    }
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
 
     const preset = await prisma.userProjectPreset.findUnique({
       where: { id },
@@ -43,10 +47,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     if (!preset) {
       return NextResponse.json({ error: 'Preset not found' }, { status: 404 })
     }
-
-    if (preset.userId !== userId) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
-    }
+    // Owner check against the effective user (was a client-supplied ?userId).
+    const denied = assertOwner(eff, preset.userId)
+    if (denied) return denied
 
     await prisma.userProjectPreset.delete({ where: { id } })
 

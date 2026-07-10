@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import prisma from '@/lib/prisma'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import { isBlankModelField } from '@/components/projects/ProjectForm/projectLlmGate.logic'
+import { requireEffectiveUser, ownerScope } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8080'
 
-// GET /api/projects - List projects (optional user_id filter)
-export async function GET(request: NextRequest) {
+// GET /api/projects - List the effective user's projects.
+// The client-supplied ?userId is ignored as an auth input: the list is always
+// scoped to the caller's effective user (admin -> own, unless simulating X).
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('userId')
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
 
     const projects = await prisma.project.findMany({
-      where: userId ? { userId } : undefined,
+      where: ownerScope(eff),
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -47,6 +50,11 @@ export async function GET(request: NextRequest) {
 // Accepts either JSON or multipart/form-data (when RoE document is attached)
 export async function POST(request: NextRequest) {
   try {
+    // The new project is owned by the caller's effective user; the body-supplied
+    // userId is ignored so a caller cannot create a project under another user.
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+
     let body: Record<string, unknown>
     let roeFileBuffer: Buffer | null = null
     let roeFileName = ''
@@ -70,7 +78,7 @@ export async function POST(request: NextRequest) {
       body = await request.json()
     }
 
-    const { userId, name, targetDomain, ipMode, id: clientId, ...optionalParams } = body as {
+    const { userId: _bodyUserId, name, targetDomain, ipMode, id: clientId, ...optionalParams } = body as {
       userId: string
       name: string
       targetDomain?: string
@@ -79,9 +87,13 @@ export async function POST(request: NextRequest) {
       [key: string]: unknown
     }
 
-    if (!userId || !name) {
+    // Owner is the effective user, never the client-supplied body value.
+    const userId = eff.userId
+    void _bodyUserId
+
+    if (!name) {
       return NextResponse.json(
-        { error: 'userId and name are required' },
+        { error: 'name is required' },
         { status: 400 }
       )
     }
@@ -255,7 +267,7 @@ export async function POST(request: NextRequest) {
     // Create Domain node in Neo4j so it's visible in the graph immediately
     if (!ipMode && project.targetDomain) {
       try {
-        const session = getSession()
+        const session = getGraphSession()
         try {
           await session.run(
             `MERGE (d:Domain {name: $name, user_id: $userId, project_id: $projectId})

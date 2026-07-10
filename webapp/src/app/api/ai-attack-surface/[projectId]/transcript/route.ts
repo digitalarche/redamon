@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import { promises as fs } from 'fs'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import { resolveTranscriptPath, transcriptContentType, transcriptDisposition } from '@/lib/aiAttackTranscript'
 
 interface RouteParams {
@@ -18,6 +19,8 @@ const MAX_BYTES = 8 * 1024 * 1024
 //      caller can't read another project's transcripts or arbitrary files).
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
   const ref = request.nextUrl.searchParams.get('ref') || ''
 
   const filePath = resolveTranscriptPath(ref)
@@ -25,7 +28,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ error: 'Invalid transcript reference' }, { status: 400 })
   }
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     const owned = await session.run(
       `MATCH (v:Vulnerability {project_id: $pid})

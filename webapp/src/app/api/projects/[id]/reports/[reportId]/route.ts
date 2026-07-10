@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { existsSync, readFileSync, unlinkSync } from 'fs'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 interface RouteParams {
   params: Promise<{ id: string; reportId: string }>
@@ -10,6 +11,11 @@ interface RouteParams {
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id, reportId } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
 
     const report = await prisma.report.findFirst({
       where: { id: reportId, projectId: id },
@@ -45,6 +51,11 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id, reportId } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
 
     const report = await prisma.report.findFirst({
       where: { id: reportId, projectId: id },

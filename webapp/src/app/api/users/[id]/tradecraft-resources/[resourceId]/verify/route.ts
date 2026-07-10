@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
 interface RouteParams {
@@ -13,6 +14,8 @@ const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, resourceId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json().catch(() => ({}))
     const force = body.force === true
 
@@ -81,12 +84,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const e = error as { name?: string; message?: string }
     if (e?.name === 'AbortError') {
       try {
-        const { id, resourceId } = await params
+        // Ownership already enforced at the top of the handler.
+        const { resourceId } = await params
         await prisma.userTradecraftResource.update({
           where: { id: resourceId },
           data: { lastError: 'verify timed out (240s)' },
         })
-        void id
       } catch {}
       return NextResponse.json({ error: 'verify timed out' }, { status: 504 })
     }

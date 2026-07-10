@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireProjectScopedResource } from '@/lib/access'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -9,6 +11,17 @@ interface RouteParams {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireProjectScopedResource(eff, async () => {
+        const r = await prisma.remediation.findUnique({ where: { id }, select: { projectId: true } })
+        return r?.projectId
+      })
+      if (guard instanceof NextResponse) return guard
+    }
+
     const body = await request.json()
     const { fileChanges } = body
 

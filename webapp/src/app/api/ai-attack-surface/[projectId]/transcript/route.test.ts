@@ -8,7 +8,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest'
 let ownedCount = 0
 const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
 vi.mock('@/app/api/graph/neo4j', () => ({
-  getSession: () => ({
+  getGraphSession: () => ({
     run: async (cypher: string, params: Record<string, unknown>) => {
       runCalls.push({ cypher, params })
       return { records: [{ get: () => ownedCount }] }   // count query always returns a row
@@ -16,6 +16,9 @@ vi.mock('@/app/api/graph/neo4j', () => ({
     close: async () => {},
   }),
 }))
+
+// Ownership is covered by the BOLA + live E2E tests; stub the guard open here.
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 let statResult: { isFile: () => boolean; size: number } | null = null
 let fileBody = Buffer.from('')

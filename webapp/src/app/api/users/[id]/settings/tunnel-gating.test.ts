@@ -30,6 +30,13 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+// Ownership is exercised separately in settings.access.test.ts; here we stub the
+// guard open so these tests stay focused on the tunnel-activation logic.
+vi.mock('@/lib/session', () => ({
+  requireUserAccess: vi.fn().mockResolvedValue(null),
+  isInternalRequest: vi.fn().mockReturnValue(false),
+}))
+
 import { PUT } from './route'
 
 const WORKER_URL = 'http://kali-sandbox:8015/tunnel/configure'

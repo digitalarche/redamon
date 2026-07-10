@@ -27,7 +27,7 @@ export function getDriver(): Driver {
   return global.neo4jDriver
 }
 
-export function getSession(): Session {
+export function getGraphSession(): Session {
   return getDriver().session()
 }
 

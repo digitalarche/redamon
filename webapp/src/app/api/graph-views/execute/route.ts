@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '../../graph/neo4j'
+import { getGraphSession } from '../../graph/neo4j'
 import { formatGraphRecords } from '../../graph/format'
 import { injectProjectFilter } from './injectProjectFilter'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 /**
  * Execute a Cypher query (from a saved graph view) against Neo4j,
@@ -19,6 +20,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Only the project's effective owner may run a (read-only) view query against
+    // its subgraph.
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, projectId)
+    if (access instanceof NextResponse) return access
+
     // Block write operations -- data filters are read-only
     const upper = cypherQuery.toUpperCase().replace(/\/\/[^\n]*/g, '')
     const WRITE_KEYWORDS = ['CREATE', 'MERGE', 'DELETE', 'DETACH', 'SET', 'REMOVE', 'DROP', 'CALL']
@@ -33,7 +41,7 @@ export async function POST(request: NextRequest) {
     // Inject project_id filter into every node pattern in the Cypher query.
     const filtered = injectProjectFilter(cypherQuery)
 
-    const session = getSession()
+    const session = getGraphSession()
     try {
       const result = await session.run(filtered, { projectId })
       const { nodes, links } = formatGraphRecords(result.records)

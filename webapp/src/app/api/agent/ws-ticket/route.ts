@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { getEffectiveUser } from '@/lib/session'
+import { requireProjectAccess } from '@/lib/access'
 import { createWsTicket } from '@/lib/auth'
 
 // POST /api/agent/ws-ticket
 //
 // STRIDE S6: mints a short-lived ticket the browser includes in the /ws/agent
-// init frame so the agent can authenticate the WebSocket. The user identity is
-// taken from the verified JWT COOKIE (getSession), never from the request body
-// or the spoofable x-user-id header — an internal-key caller (e.g. a compromised
-// scanner, S3) has no cookie and therefore cannot mint a ticket for any user.
-// projectId/sessionId are caller-scoped context and are bound into the ticket.
+// init frame so the agent can authenticate the WebSocket. The ticket binds the
+// EFFECTIVE user (getEffectiveUser) — a standard user's own id, or, when an admin
+// is simulating user X, X — never a body-supplied or x-user-id value. So the agent
+// acts as the impersonated user (fetches X's keys, tags the graph as X), and an
+// admin can only mint a ticket for a project the simulated user owns. An
+// internal-key caller has no cookie and cannot mint a ticket for anyone.
 export async function POST(request: NextRequest) {
-  const session = await getSession()
-  if (!session) {
+  const eff = await getEffectiveUser()
+  if (!eff) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -26,7 +28,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // The effective user must own the project the ticket is scoped to.
+  const access = await requireProjectAccess(eff, projectId)
+  if (access instanceof NextResponse) return access
+
   // Null when AGENT_WS_TICKET_SECRET is unset (dev) — the agent fails open.
-  const ticket = await createWsTicket(session.userId, projectId, sessionId)
+  const ticket = await createWsTicket(eff.userId, projectId, sessionId)
   return NextResponse.json({ ticket })
 }

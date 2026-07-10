@@ -5,6 +5,7 @@
  * Both fire async POST ${AGENT_API_URL}/mcp/reload after a successful write.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 import { mcpServerSchema, validateMcpServers, type MCPServer } from '@/lib/mcp/schema'
 import { maskMcpServersForApi, restoreMaskedToken } from '../route'
@@ -30,6 +31,8 @@ async function fireReload(userMcpServers: unknown) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, serverId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json()
 
     // Look up the existing record first so we can restore the literal auth
@@ -88,9 +91,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, serverId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     const existing = await prisma.userSettings.findUnique({
       where: { userId: id },

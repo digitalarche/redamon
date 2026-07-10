@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
@@ -12,6 +13,8 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
     const body = await request.json()
 
     // Verify project exists

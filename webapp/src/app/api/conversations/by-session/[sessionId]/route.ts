@@ -1,13 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireConversationAccessBySession } from '@/lib/access'
 
-// GET /api/conversations/by-session/[sessionId] - Lookup by session
+// GET /api/conversations/by-session/[sessionId] - Lookup by session.
+// The agent persists chat via this route with X-Internal-Key (carve-out); every
+// browser caller may only reach a session they (effectively) own.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     const { sessionId } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
 
     const conversation = await prisma.conversation.findUnique({
       where: { sessionId },
@@ -42,6 +53,14 @@ export async function PATCH(
 ) {
   try {
     const { sessionId } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
+
     const body = await request.json()
 
     const allowedFields = ['title', 'status', 'agentRunning', 'currentPhase', 'iterationCount']

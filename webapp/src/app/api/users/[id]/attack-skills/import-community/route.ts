@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
@@ -8,9 +9,11 @@ interface RouteParams {
 }
 
 // POST /api/users/[id]/attack-skills/import-community — Import all community agent skills
-export async function POST(_request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     // Fetch the community skills catalog from agentic /community-skills endpoint
     const catalogRes = await fetch(`${AGENT_API_URL}/community-skills`, {

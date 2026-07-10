@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
@@ -10,6 +11,8 @@ interface RouteParams {
 // GET /api/ai-attack-surface/{projectId}/{runId}/status
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   const { projectId, runId } = await params
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
   try {
     const response = await orchestratorFetch(
       `${RECON_ORCHESTRATOR_URL}/ai-attack-surface/${projectId}/${runId}/status`,

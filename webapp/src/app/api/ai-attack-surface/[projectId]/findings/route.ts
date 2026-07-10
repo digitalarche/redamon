@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 interface RouteParams {
   params: Promise<{ projectId: string }>
@@ -18,7 +19,9 @@ const AI_ATTACK_SOURCES = ['garak', 'pyrit', 'giskard', 'promptfoo']
 
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
-  const session = getSession()
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
+  const session = getGraphSession()
   try {
     const res = await session.run(
       `MATCH (v:Vulnerability {project_id: $pid})

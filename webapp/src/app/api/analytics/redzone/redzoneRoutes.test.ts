@@ -1,7 +1,7 @@
 /**
  * Route handler tests for all 6 Red Zone endpoints.
  *
- * Strategy: mock `getSession` to return a deterministic stub that:
+ * Strategy: mock `getGraphSession` to return a deterministic stub that:
  *   - captures the Cypher text + params so we can assert the query shape,
  *   - returns a list of fake records each supporting `.get(key)`.
  *
@@ -9,6 +9,7 @@
  * @vitest-environment node
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 // --- Mock neo4j module BEFORE importing route modules ---
 const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
@@ -16,7 +17,7 @@ let runReturn: Array<Record<string, unknown>> = []
 let shouldThrow: Error | null = null
 
 vi.mock('@/app/api/graph/neo4j', () => ({
-  getSession: () => ({
+  getGraphSession: () => ({
     run: async (cypher: string, params: Record<string, unknown>) => {
       runCalls.push({ cypher, params })
       if (shouldThrow) throw shouldThrow
@@ -355,7 +356,7 @@ describe('/api/analytics/redzone/netInitAccess', () => {
     const calls: any[] = []
     vi.resetModules()
     vi.doMock('@/app/api/graph/neo4j', () => ({
-      getSession: () => ({
+      getGraphSession: () => ({
         run: async (cypher: string, params: any) => {
           calls.push({ cypher, params })
           const recs = (calls.length === 1 ? portRows : vulnRows).map(row => ({ get: (k: string) => (row as any)[k] }))
@@ -384,7 +385,7 @@ describe('/api/analytics/redzone/netInitAccess', () => {
     const calls: any[] = []
     vi.resetModules()
     vi.doMock('@/app/api/graph/neo4j', () => ({
-      getSession: () => ({
+      getGraphSession: () => ({
         run: async () => {
           calls.push(1)
           const recs = (calls.length === 1 ? rows : []).map(row => ({ get: (k: string) => (row as any)[k] }))

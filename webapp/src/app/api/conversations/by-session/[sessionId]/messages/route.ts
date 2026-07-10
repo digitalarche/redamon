@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireConversationAccessBySession } from '@/lib/access'
 
 // POST /api/conversations/by-session/[sessionId]/messages
-// Append messages by session ID (used by agent backend)
-// Auto-creates conversation if body includes projectId + userId
+// Append messages by session ID (used by the agent backend with X-Internal-Key —
+// carve-out; browser callers may only append to a session they own).
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     const { sessionId } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
+
     const body = await request.json()
 
     // Find or create conversation

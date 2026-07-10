@@ -4,6 +4,7 @@ import { gatherReportData } from '@/lib/report/reportData'
 import { generateReportHtml, type LLMNarratives } from '@/lib/report/reportTemplate'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import path from 'path'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 const REPORT_OUTPUT_PATH = process.env.REPORT_OUTPUT_PATH || '/data/reports'
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://agent:8080'
@@ -16,6 +17,12 @@ interface RouteParams {
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
+
     const reports = await prisma.report.findMany({
       where: { projectId: id },
       orderBy: { createdAt: 'desc' },
@@ -44,6 +51,11 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function POST(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
 
     // 1. Gather all data from Neo4j + PostgreSQL
     const reportData = await gatherReportData(id)

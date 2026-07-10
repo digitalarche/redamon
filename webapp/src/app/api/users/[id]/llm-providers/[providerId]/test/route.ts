@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
 interface RouteParams {
@@ -12,6 +13,8 @@ const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, providerId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json()
 
     let config: Record<string, unknown>

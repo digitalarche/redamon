@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
 interface RouteParams {
@@ -6,9 +7,11 @@ interface RouteParams {
 }
 
 // GET /api/users/[id]/attack-skills — List skills (id, name, createdAt; exclude content)
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     const skills = await prisma.userAttackSkill.findMany({
       where: { userId: id },
@@ -33,6 +36,8 @@ const MAX_SKILLS_PER_USER = 20
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json()
 
     const { name, description, content } = body

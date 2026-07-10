@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest, requireUserAccess } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -18,7 +19,14 @@ const TOOL_NAMES = ['tavily', 'shodan', 'serp', 'nvd', 'vulners', 'urlscan', 'ce
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
-    const internal = request.nextUrl.searchParams.get('internal') === 'true'
+
+    // Ownership + secret-unmask gate (STRIDE I1). Browser callers must own the
+    // account (or be admin) and NEVER receive unmasked secrets; unmasking is
+    // gated on a valid X-Internal-Key header (the agent/scanners), not the
+    // client-supplied ?internal=true query param.
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+    const internal = isInternalRequest(request) && request.nextUrl.searchParams.get('internal') === 'true'
 
     let settings = await prisma.userSettings.findUnique({
       where: { userId: id },
@@ -121,6 +129,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    // Only the account owner (or admin), or a trusted internal caller, may write
+    // another user's settings (which include tunnel credentials + OSINT keys).
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+
     const body = await request.json()
 
     // If a masked value is sent back, preserve the existing value

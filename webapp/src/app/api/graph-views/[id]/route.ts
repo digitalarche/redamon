@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser, requireProjectScopedResource } from '@/lib/access'
+
+// A graph view is owned via its parent project.
+async function guardView(id: string): Promise<NextResponse | null> {
+  const eff = await requireEffectiveUser()
+  if (eff instanceof NextResponse) return eff
+  const guard = await requireProjectScopedResource(eff, async () => {
+    const v = await prisma.graphView.findUnique({ where: { id }, select: { projectId: true } })
+    return v?.projectId
+  })
+  return guard instanceof NextResponse ? guard : null
+}
 
 export async function PUT(
   request: NextRequest,
@@ -7,16 +19,11 @@ export async function PUT(
 ) {
   const { id } = await params
   try {
-    const body = await request.json()
-    const { projectId, name, description } = body
+    const denied = await guardView(id)
+    if (denied) return denied
 
-    // Verify view belongs to the specified project
-    if (projectId) {
-      const existing = await prisma.graphView.findUnique({ where: { id } })
-      if (!existing || existing.projectId !== projectId) {
-        return NextResponse.json({ error: 'View not found' }, { status: 404 })
-      }
-    }
+    const body = await request.json()
+    const { name, description } = body
 
     const view = await prisma.graphView.update({
       where: { id },
@@ -37,20 +44,14 @@ export async function PUT(
 }
 
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const projectId = request.nextUrl.searchParams.get('projectId')
 
   try {
-    // Verify view belongs to the specified project
-    if (projectId) {
-      const existing = await prisma.graphView.findUnique({ where: { id } })
-      if (!existing || existing.projectId !== projectId) {
-        return NextResponse.json({ error: 'View not found' }, { status: 404 })
-      }
-    }
+    const denied = await guardView(id)
+    if (denied) return denied
 
     await prisma.graphView.delete({ where: { id } })
     return NextResponse.json({ success: true })

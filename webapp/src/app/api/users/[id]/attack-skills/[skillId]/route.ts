@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
 
@@ -7,9 +8,11 @@ interface RouteParams {
 }
 
 // GET /api/users/[id]/attack-skills/[skillId] — Full skill with content (for download)
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, skillId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     const skill = await prisma.userAttackSkill.findFirst({
       where: { id: skillId, userId: id },
@@ -33,6 +36,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, skillId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json()
 
     const existing = await prisma.userAttackSkill.findFirst({
@@ -88,9 +93,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 // DELETE /api/users/[id]/attack-skills/[skillId] — Delete + cascade cleanup
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, skillId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     const existing = await prisma.userAttackSkill.findFirst({
       where: { id: skillId, userId: id },

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import { createHash } from 'crypto'
 
 // Reuse the graph API's Neo4j driver
-import { getSession } from '../../../graph/neo4j'
+import { getGraphSession } from '../../../graph/neo4j'
 
 const PROJECT_ID_RE = /^[a-zA-Z0-9_-]+$/
 
@@ -48,6 +49,8 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
   if (!PROJECT_ID_RE.test(projectId)) {
     return new NextResponse(null, { status: 400 })
   }
@@ -68,7 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
   cache.delete(projectId)
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     // 1. JsReconFinding nodes (files + findings)
     const findingsResult = await session.run(
@@ -337,11 +340,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 export async function HEAD(_request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
   if (!PROJECT_ID_RE.test(projectId)) {
     return new NextResponse(null, { status: 400 })
   }
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     const result = await session.run(
       `MATCH (jf:JsReconFinding {project_id: $pid}) RETURN count(jf) AS cnt LIMIT 1`,

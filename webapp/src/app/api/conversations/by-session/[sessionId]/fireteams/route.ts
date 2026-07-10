@@ -1,15 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireConversationAccessBySession } from '@/lib/access'
 
 // POST /api/conversations/by-session/[sessionId]/fireteams
-// Create a new Fireteam row and its FireteamMember rows. Called by agent.
-// Requires body.userId + body.projectId to auto-create conversation if missing.
+// Create a new Fireteam row and its FireteamMember rows. Called by the agent with
+// X-Internal-Key (carve-out); browser callers must own the session.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     const { sessionId } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
+
     const body = await request.json()
     const {
       fireteamIdKey,
@@ -78,11 +88,19 @@ export async function POST(
 // GET /api/conversations/by-session/[sessionId]/fireteams
 // List all fireteams for a session. Used by frontend session resume.
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     const { sessionId } = await params
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const guard = await requireConversationAccessBySession(eff, sessionId)
+      if (guard instanceof NextResponse) return guard
+    }
+
     const conversation = await prisma.conversation.findUnique({ where: { sessionId } })
     if (!conversation) {
       return NextResponse.json({ fireteams: [] })

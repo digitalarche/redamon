@@ -25,6 +25,8 @@ const CANARY_KEY = 'sk-ant-api03-LEAK-CANARY-DO-NOT-LOG-XXXXXXXXXX'
 
 // Mock Prisma before importing the route. Hoisted by vitest.
 const mockFindMany = vi.fn()
+vi.mock('@/lib/access', () => ({ requireEffectiveUser: vi.fn().mockResolvedValue({ userId: 'u1' }) }))
+
 vi.mock('@/lib/prisma', () => ({
   default: { userLlmProvider: { findMany: (...args: unknown[]) => mockFindMany(...args) } },
 }))

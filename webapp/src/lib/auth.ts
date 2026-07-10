@@ -67,3 +67,33 @@ export async function createWsTicket(
     .setExpirationTime(WS_TICKET_EXPIRY)
     .sign(key)
 }
+
+// --- Admin impersonation "act-as" token (per-user access control) -------------
+// Records which user an ADMIN is currently simulating, in a dedicated httpOnly
+// cookie. Unlike the ws-ticket (which is sent to the agent), this token is minted
+// AND verified only inside the webapp, so reusing AUTH_SECRET is safe. It is
+// mutually non-substitutable with the login JWT by claim shape: a login token has
+// `role` and no `act`; an act-as token has `act` and no `role`. getEffectiveUser
+// only honors it when the caller's real role (from the untouched login JWT) is
+// admin AND the token's `sub` equals that admin's id — so a standard user forging
+// this cookie is ignored, and a login cookie replayed here fails the `act` check.
+export const ACT_AS_COOKIE_NAME = 'redamon-act-as'
+const ACT_AS_EXPIRY = '12h'
+
+export async function createActAsToken(adminUserId: string, targetUserId: string): Promise<string> {
+  return new SignJWT({ sub: adminUserId, act: targetUserId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(ACT_AS_EXPIRY)
+    .sign(getSecret())
+}
+
+export async function verifyActAsToken(token: string): Promise<{ sub: string; act: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, getSecret())
+    if (!payload.sub || typeof payload.act !== 'string' || !payload.act) return null
+    return { sub: payload.sub as string, act: payload.act }
+  } catch {
+    return null
+  }
+}

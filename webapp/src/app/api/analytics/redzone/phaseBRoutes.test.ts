@@ -2,13 +2,14 @@
  * Route handler tests for Phase B endpoints: webInitAccess, paramMatrix,
  * sharedInfra, dnsEmail.
  *
- * Strategy mirrors redzoneRoutes.test.ts: mock getSession → deterministic stub,
+ * Strategy mirrors redzoneRoutes.test.ts: mock getGraphSession → deterministic stub,
  * capture Cypher text + params, return canned records, assert JSON shape.
  *
  * Run: npx vitest run src/app/api/analytics/redzone/phaseBRoutes.test.ts
  * @vitest-environment node
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
 let runReturn: Array<Record<string, unknown>> | Array<Array<Record<string, unknown>>> = []
@@ -17,7 +18,7 @@ let shouldThrow: Error | null = null
 vi.mock('@/app/api/graph/neo4j', () => {
   let callIdx = 0
   return {
-    getSession: () => ({
+    getGraphSession: () => ({
       run: async (cypher: string, params: Record<string, unknown>) => {
         runCalls.push({ cypher, params })
         if (shouldThrow) throw shouldThrow
@@ -220,7 +221,7 @@ describe('/api/analytics/redzone/sharedInfra', () => {
     let idx = 0
     const fixtures = runReturn as Array<Array<Record<string, unknown>>>
     vi.doMock('@/app/api/graph/neo4j', () => ({
-      getSession: () => ({
+      getGraphSession: () => ({
         run: async () => {
           const ds = fixtures[idx++] || []
           return { records: ds.map(row => ({ get: (k: string) => row[k] })) }

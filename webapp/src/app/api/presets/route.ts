@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser, ownerScope } from '@/lib/access'
 
-export async function GET(request: NextRequest) {
+// Presets are user-scoped; the client-supplied userId is ignored as an auth input.
+export async function GET() {
   try {
-    const userId = request.nextUrl.searchParams.get('userId')
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 })
-    }
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
 
     const presets = await prisma.userProjectPreset.findMany({
-      where: { userId },
+      where: ownerScope(eff),
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -31,12 +31,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { userId, name, description, settings } = body
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 })
-    }
+    const body = await request.json()
+    const { name, description, settings } = body
+
     if (!name || !name.trim()) {
       return NextResponse.json({ error: 'Preset name is required' }, { status: 400 })
     }
@@ -44,14 +44,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Settings object is required' }, { status: 400 })
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } })
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
-
+    // Owner is the effective user, never a client-supplied body value.
     const preset = await prisma.userProjectPreset.create({
       data: {
-        userId,
+        userId: eff.userId,
         name: name.trim(),
         description: (description || '').trim(),
         settings,

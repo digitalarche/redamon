@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { getSession } from '@/app/api/graph/neo4j'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 import { existsSync, createReadStream } from 'fs'
 import path from 'path'
 import archiver from 'archiver'
 import { Readable } from 'stream'
 import { randomUUID } from 'crypto'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 const RECON_OUTPUT_PATH = process.env.RECON_OUTPUT_PATH || '/data/recon-output'
 const GVM_OUTPUT_PATH = process.env.GVM_OUTPUT_PATH || '/data/gvm-output'
@@ -60,6 +61,14 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
 
+    // Ownership: export bundles the ENTIRE project (row + RoE binary, all
+    // conversations/messages, reports, the Neo4j subgraph, presets), so it is the
+    // most sensitive project route. Only the effective owner may export it.
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, id)
+    if (access instanceof NextResponse) return access
+
     // 1. Fetch project from PostgreSQL
     const project = await prisma.project.findUnique({ where: { id } })
     if (!project) {
@@ -100,7 +109,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     let neo4jNodes: Array<{ labels: string[]; properties: Record<string, unknown>; _exportId: string }> = []
     let neo4jRelationships: Array<{ startExportId: string; endExportId: string; type: string; properties: Record<string, unknown> }> = []
 
-    const session = getSession()
+    const session = getGraphSession()
     try {
       // Export all nodes for this project
       const nodesResult = await session.run(

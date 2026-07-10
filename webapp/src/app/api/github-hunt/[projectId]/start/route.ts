@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import prisma from '@/lib/prisma'
 import { existsSync } from 'fs'
 import path from 'path'
@@ -15,6 +16,8 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params
+    const __denied = await guardProject(projectId)
+    if (__denied) return __denied
 
     // Verify project exists
     const project = await prisma.project.findUnique({

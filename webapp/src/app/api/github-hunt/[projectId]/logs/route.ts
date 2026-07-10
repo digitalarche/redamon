@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { guardProject } from '@/lib/access'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_ORCHESTRATOR_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://localhost:8010'
@@ -9,6 +10,8 @@ interface RouteParams {
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { projectId } = await params
+  const __denied = await guardProject(projectId)
+  if (__denied) return __denied
 
   // Proxy the SSE stream from the recon orchestrator
   const response = await orchestratorFetch(`${RECON_ORCHESTRATOR_URL}/github-hunt/${projectId}/logs`, {

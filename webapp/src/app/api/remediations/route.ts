@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
-// GET /api/remediations?projectId=X - List remediations for project
+// GET /api/remediations?projectId=X - List remediations for project.
+// Cypherfix reads/writes remediations with X-Internal-Key (carve-out); browser
+// callers may only reach a project they (effectively) own.
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -12,6 +16,13 @@ export async function GET(request: NextRequest) {
         { error: 'projectId is required' },
         { status: 400 }
       )
+    }
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const access = await requireProjectAccess(eff, projectId)
+      if (access instanceof NextResponse) return access
     }
 
     const status = searchParams.get('status')
@@ -49,6 +60,13 @@ export async function POST(request: NextRequest) {
         { error: 'projectId, title, and description are required' },
         { status: 400 }
       )
+    }
+
+    if (!isInternalRequest(request)) {
+      const eff = await requireEffectiveUser()
+      if (eff instanceof NextResponse) return eff
+      const access = await requireProjectAccess(eff, projectId)
+      if (access instanceof NextResponse) return access
     }
 
     const remediation = await prisma.remediation.create({

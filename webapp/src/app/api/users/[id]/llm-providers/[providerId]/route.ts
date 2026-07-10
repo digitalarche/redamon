@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest, requireUserAccess } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string; providerId: string }>
@@ -24,7 +25,12 @@ function maskProvider(provider: Record<string, unknown>): Record<string, unknown
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, providerId } = await params
-    const internal = request.nextUrl.searchParams.get('internal') === 'true'
+
+    // Ownership + secret-unmask gate (STRIDE I1): browser callers must own the
+    // account (or be admin) and always get masked rows; unmasked rows require a
+    // valid X-Internal-Key header, never the ?internal=true query param.
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
 
     const provider = await prisma.userLlmProvider.findFirst({
       where: { id: providerId, userId: id },
@@ -34,7 +40,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Provider not found' }, { status: 404 })
     }
 
-    if (internal) {
+    if (isInternalRequest(request)) {
       return NextResponse.json(provider)
     }
 
@@ -52,9 +58,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, providerId } = await params
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+
     const body = await request.json()
 
-    // Verify ownership
+    // Verify the provider belongs to the target user
     const existing = await prisma.userLlmProvider.findFirst({
       where: { id: providerId, userId: id },
     })
@@ -98,6 +108,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, providerId } = await params
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
 
     const existing = await prisma.userLlmProvider.findFirst({
       where: { id: providerId, userId: id },

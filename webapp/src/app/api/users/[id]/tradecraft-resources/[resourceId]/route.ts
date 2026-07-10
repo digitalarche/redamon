@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest, requireUserAccess } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string; resourceId: string }>
@@ -21,7 +22,9 @@ function maskResource(r: Record<string, unknown>): Record<string, unknown> {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, resourceId } = await params
-    const internal = request.nextUrl.searchParams.get('internal') === 'true'
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
 
     const resource = await prisma.userTradecraftResource.findFirst({
       where: { id: resourceId, userId: id },
@@ -29,7 +32,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!resource) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 })
     }
-    if (internal) {
+    // Unmasked only for trusted internal-key callers, never the ?internal=true param.
+    if (isInternalRequest(request)) {
       return NextResponse.json(resource)
     }
     return NextResponse.json(maskResource(resource as unknown as Record<string, unknown>))
@@ -46,6 +50,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, resourceId } = await params
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+
     const body = await request.json()
 
     const existing = await prisma.userTradecraftResource.findFirst({
@@ -107,9 +115,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 // DELETE /api/users/[id]/tradecraft-resources/[resourceId]
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, resourceId } = await params
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+
     const existing = await prisma.userTradecraftResource.findFirst({
       where: { id: resourceId, userId: id },
     })

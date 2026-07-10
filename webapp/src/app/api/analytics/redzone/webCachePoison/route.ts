@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 function toNum(val: unknown): number | null {
   if (val == null) return null
@@ -12,11 +13,13 @@ function toNum(val: unknown): number | null {
 // linked to the affected Endpoint and/or BaseURL.
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     const result = await session.run(
       `MATCH (v:Vulnerability {project_id: $pid, source: 'cache_poisoning'})

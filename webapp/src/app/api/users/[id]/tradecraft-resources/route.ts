@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest, requireUserAccess } from '@/lib/session'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -81,7 +82,12 @@ function validateUrl(raw: string): { ok: boolean; error?: string } {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
-    const internal = request.nextUrl.searchParams.get('internal') === 'true'
+
+    // Ownership + secret-unmask gate (STRIDE I1): unmasked githubTokenOverride
+    // requires a valid X-Internal-Key header (the agent), not ?internal=true.
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+    const internal = isInternalRequest(request) && request.nextUrl.searchParams.get('internal') === 'true'
 
     const resources = await prisma.userTradecraftResource.findMany({
       where: { userId: id },
@@ -109,6 +115,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const denied = await requireUserAccess(request, id)
+    if (denied) return denied
+
     const body = await request.json()
     const skipVerify = request.nextUrl.searchParams.get('skipVerify') === 'true'
 

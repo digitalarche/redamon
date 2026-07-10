@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { getSession } from './neo4j'
+import { getGraphSession } from './neo4j'
 import { formatGraphRecords } from './format'
 import { getCached, setCached, invalidateCache } from './cache'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 const GRAPH_PERF_DEBUG = true
 
@@ -16,7 +17,7 @@ const GRAPH_PERF_DEBUG = true
 // conversation, BEFORE the main query runs, so orphans are both purged from
 // storage and never returned. Best-effort — a failure must not block the graph.
 async function reconcileOrphanChains(
-  session: ReturnType<typeof getSession>,
+  session: ReturnType<typeof getGraphSession>,
   projectId: string
 ): Promise<void> {
   try {
@@ -59,6 +60,15 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     )
   }
+
+  // The graph is scoped to a project; the caller's effective user must own that
+  // project. Since a project has exactly one owner, proving ownership here scopes
+  // the returned subgraph to the effective user (blocks the impersonation-URL BOLA
+  // where an admin simulating X, or any user, reads another user's graph by id).
+  const eff = await requireEffectiveUser()
+  if (eff instanceof NextResponse) return eff
+  const access = await requireProjectAccess(eff, projectId)
+  if (access instanceof NextResponse) return access
 
   if (GRAPH_PERF_DEBUG) console.log(`[GraphPerf:API] GET /api/graph projectId=${projectId}`)
 
@@ -105,7 +115,7 @@ export async function GET(request: NextRequest) {
 
   if (GRAPH_PERF_DEBUG) console.log(`[GraphPerf:API] Cache MISS for ${projectId}`)
 
-  const session = getSession()
+  const session = getGraphSession()
 
   try {
     // Self-heal orphaned attack-chain nodes before reading (see fn comment).
@@ -273,7 +283,13 @@ export async function DELETE(request: NextRequest) {
     )
   }
 
-  const session = getSession()
+  // Only the project's effective owner may delete its graph nodes.
+  const eff = await requireEffectiveUser()
+  if (eff instanceof NextResponse) return eff
+  const access = await requireProjectAccess(eff, projectId)
+  if (access instanceof NextResponse) return access
+
+  const session = getGraphSession()
 
   try {
     // Delete any node except Domain and Subdomain (protected)

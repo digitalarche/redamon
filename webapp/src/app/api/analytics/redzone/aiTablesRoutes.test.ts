@@ -8,13 +8,14 @@
  * @vitest-environment node
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
 let runQueue: Array<Array<Record<string, unknown>>> = []
 let shouldThrow: Error | null = null
 
 vi.mock('@/app/api/graph/neo4j', () => ({
-  getSession: () => ({
+  getGraphSession: () => ({
     run: async (cypher: string, params: Record<string, unknown>) => {
       runCalls.push({ cypher, params })
       if (shouldThrow) throw shouldThrow

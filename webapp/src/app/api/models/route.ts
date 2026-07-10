@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireEffectiveUser } from '@/lib/access'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 
@@ -7,11 +8,16 @@ const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 // Body-based (not query-string) so plaintext apiKey values never appear in access logs.
 export async function POST(request: NextRequest) {
   try {
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+
     const { userId } = await request.json().catch(() => ({ userId: null }))
 
+    // Only ever load the EFFECTIVE user's providers; the body userId cannot be
+    // used to enumerate another user's configured providers.
     let providers: unknown[] = []
     if (userId) {
-      providers = await prisma.userLlmProvider.findMany({ where: { userId } })
+      providers = await prisma.userLlmProvider.findMany({ where: { userId: eff.userId } })
     }
 
     const res = await fetch(`${AGENT_API_URL}/models`, {

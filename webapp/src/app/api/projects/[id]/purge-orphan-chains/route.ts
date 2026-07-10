@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import { getSession } from '../../../graph/neo4j'
+import { getGraphSession } from '../../../graph/neo4j'
+import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 // POST /api/projects/[id]/purge-orphan-chains
 //
@@ -10,11 +11,18 @@ import { getSession } from '../../../graph/neo4j'
 // (the loop re-seeded the chain after the delete) or after an import. Each
 // orphan's agent task is stopped first so it cannot immediately re-seed.
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: projectId } = await params
+
+    // Ownership: this stops the project's agent tasks and DETACH-DELETEs graph
+    // nodes, so only the effective owner may invoke it.
+    const eff = await requireEffectiveUser()
+    if (eff instanceof NextResponse) return eff
+    const access = await requireProjectAccess(eff, projectId)
+    if (access instanceof NextResponse) return access
 
     // Live conversations for this project = the session_ids that must be KEPT.
     const conversations = await prisma.conversation.findMany({
@@ -23,7 +31,7 @@ export async function POST(
     })
     const liveSessionIds = new Set(conversations.map(c => c.sessionId))
 
-    const neo4jSession = getSession()
+    const neo4jSession = getGraphSession()
     let purged = 0
     const stopped: string[] = []
     try {

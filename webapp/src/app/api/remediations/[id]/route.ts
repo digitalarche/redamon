@@ -1,14 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { isInternalRequest } from '@/lib/session'
+import { requireEffectiveUser, requireProjectScopedResource } from '@/lib/access'
 
 interface RouteParams {
   params: Promise<{ id: string }>
 }
 
+// A remediation is owned via its parent project. Cypherfix uses X-Internal-Key
+// (carve-out); browser callers must own the remediation's project.
+async function guardRemediation(request: NextRequest, id: string): Promise<NextResponse | null> {
+  if (isInternalRequest(request)) return null
+  const eff = await requireEffectiveUser()
+  if (eff instanceof NextResponse) return eff
+  const guard = await requireProjectScopedResource(eff, async () => {
+    const r = await prisma.remediation.findUnique({ where: { id }, select: { projectId: true } })
+    return r?.projectId
+  })
+  return guard instanceof NextResponse ? guard : null
+}
+
 // GET /api/remediations/[id] - Get single remediation
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const denied = await guardRemediation(request, id)
+    if (denied) return denied
 
     const remediation = await prisma.remediation.findUnique({
       where: { id },
@@ -35,6 +53,10 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const denied = await guardRemediation(request, id)
+    if (denied) return denied
+
     const body = await request.json()
 
     const { projectId, createdAt, updatedAt, project, ...updateData } = body
@@ -63,9 +85,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 // DELETE /api/remediations/[id] - Delete remediation
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+
+    const denied = await guardRemediation(request, id)
+    if (denied) return denied
 
     await prisma.remediation.delete({
       where: { id },

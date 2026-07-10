@@ -6,6 +6,7 @@
  * so the running agent picks up changes without manual intervention.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 import { mcpServerSchema, validateMcpServers, MASK_PREFIX, type MCPServer } from '@/lib/mcp/schema'
 
@@ -58,9 +59,11 @@ export function restoreMaskedToken(incoming: MCPServer, existing: MCPServer | un
   return { ...incoming, auth: { ...incoming.auth, token: undefined } }
 }
 
-export async function GET(_request: NextRequest, { params }: RouteParams) {
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const settings = await prisma.userSettings.findUnique({
       where: { userId: id },
       select: { mcpServers: true },
@@ -77,6 +80,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
     const body = await request.json()
 
     const parsed = mcpServerSchema.safeParse(body)

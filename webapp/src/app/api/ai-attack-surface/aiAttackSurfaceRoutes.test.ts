@@ -1,6 +1,6 @@
 /**
  * Route tests for the AI Attack Surface webapp routes.
- *  - targets / findings: mock getSession, assert the Cypher params + mapping
+ *  - targets / findings: mock getGraphSession, assert the Cypher params + mapping
  *  - start: mock prisma + fetch, assert the orchestrator forward + project guard
  * @vitest-environment node
  */
@@ -10,7 +10,7 @@ const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
 let runReturn: Array<Record<string, unknown>> = []
 
 vi.mock('@/app/api/graph/neo4j', () => ({
-  getSession: () => ({
+  getGraphSession: () => ({
     run: async (cypher: string, params: Record<string, unknown>) => {
       runCalls.push({ cypher, params })
       return { records: runReturn.map((row) => ({ get: (k: string) => row[k] })) }
@@ -21,6 +21,10 @@ vi.mock('@/app/api/graph/neo4j', () => ({
 
 const findUnique = vi.fn()
 vi.mock('@/lib/prisma', () => ({ default: { project: { findUnique: (...a: unknown[]) => findUnique(...a) } } }))
+
+// Ownership is covered by the BOLA + live E2E tests; stub the guard open here so
+// these tests stay focused on the route's neo4j/data behavior.
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 const targetsRoute = await import('./[projectId]/targets/route')
 const findingsRoute = await import('./[projectId]/findings/route')

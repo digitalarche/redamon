@@ -60,6 +60,31 @@ webapp/
 
 ---
 
+## Authorization & Multi-User Access Control
+
+RedAmon is single-admin / multi-user: one admin manages many standard users, and **each standard user may only access their own data** (projects, graph, conversations, scans, reports, settings). Authentication (a JWT in the httpOnly `redamon-auth` cookie, verified in `middleware.ts` and `lib/session.ts`) proves *who* is calling; **authorization** proves they *own* what they touch.
+
+**Effective user.** `getEffectiveUser()` (`lib/session.ts`) returns the identity a request is scoped to:
+
+- standard user -> their own id (any impersonation input is ignored);
+- admin, not simulating -> their own id;
+- admin simulating user X -> X, and only X (via a signed httpOnly `redamon-act-as` cookie set by the admin-only `POST /api/auth/act-as`).
+
+So an admin has no "see everything" mode; to view a user's data they explicitly *switch to* that user (see the User-Management wiki page).
+
+**Guards (`lib/access.ts`).** Every API route that reads or mutates a per-user resource must scope to the effective user. Use:
+
+- `guardProject(projectId)` - one-call guard for `[projectId]` routes (scan/analytics/workspace/graph): resolves the effective user and 404s if they don't own the project.
+- `requireProjectAccess(eff, projectId)` / `requireConversationAccess(eff, id)` / `requireProjectScopedResource(eff, loadProjectId)` - when you already hold the effective user.
+- `ownerScope(eff)` - a Prisma `where` fragment (`{ userId }`) for list endpoints; never trust a client-supplied `userId`/`projectId`.
+- `requireUserAccess(request, targetUserId)` (`lib/session.ts`) - for `users/[id]/*` routes (own-or-admin, with an `X-Internal-Key` carve-out for the agent).
+
+Cross-user access is reported as **404** (anti-enumeration). Enforcement is **on by default** and fails closed; set `ACCESS_ENFORCE=0` only to run a temporary log-only (`[BOLA] would-block ...`) observation phase. Service-to-service callers (the agent, cypherfix, scanners) present `X-Internal-Key` and are carved out via `isInternalRequest(request)` on the specific routes they call.
+
+**When adding a route:** derive identity from `getEffectiveUser()`/`requireUserAccess`, never from a query/body `userId`/`projectId`; add the ownership guard before any data read; and cover it with a cross-user 403/404 test. The live end-to-end check is `tests/test_e2e_bola_live.sh`.
+
+---
+
 ## Prerequisites
 
 **Neo4j must be running first.** This webapp connects to the existing Neo4j instance in `../graph_db/`.

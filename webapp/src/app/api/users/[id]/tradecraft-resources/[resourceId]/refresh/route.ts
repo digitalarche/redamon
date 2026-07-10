@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 
 interface RouteParams {
@@ -9,9 +10,11 @@ const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 
 // POST /api/users/[id]/tradecraft-resources/[resourceId]/refresh
 //   Same as /verify with force=true and bumps lastRefreshedAt.
-export async function POST(_request: NextRequest, { params }: RouteParams) {
+export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id, resourceId } = await params
+    const __denied = await requireUserAccess(request, id)
+    if (__denied) return __denied
 
     const existing = await prisma.userTradecraftResource.findFirst({
       where: { id: resourceId, userId: id },

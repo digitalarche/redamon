@@ -5,6 +5,7 @@
  * @vitest-environment node
  */
 import { describe, test, expect, vi, beforeEach } from 'vitest'
+vi.mock('@/lib/access', () => ({ guardProject: vi.fn().mockResolvedValue(null) }))
 
 const runCalls: Array<{ cypher: string; params: Record<string, unknown> }> = []
 let runReturn: Array<Record<string, unknown>> = []
@@ -12,7 +13,7 @@ let runReturnByCall: Array<Array<Record<string, unknown>>> | null = null
 let shouldThrow: Error | null = null
 
 vi.mock('@/app/api/graph/neo4j', () => ({
-  getSession: () => {
+  getGraphSession: () => {
     let callIdx = 0
     return {
       run: async (cypher: string, params: Record<string, unknown>) => {

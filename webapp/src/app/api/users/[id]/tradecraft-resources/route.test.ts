@@ -39,6 +39,13 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+// Ownership is covered by tradecraft.access.test.ts + session.userAccess.test.ts;
+// stub the guard open here so these tests stay focused on the llmModel behavior.
+vi.mock('@/lib/session', () => ({
+  requireUserAccess: vi.fn().mockResolvedValue(null),
+  isInternalRequest: vi.fn().mockReturnValue(false),
+}))
+
 import { NextRequest } from 'next/server'
 import * as route from './route'
 

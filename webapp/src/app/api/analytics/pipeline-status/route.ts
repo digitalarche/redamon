@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { guardProject } from '@/lib/access'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
 const RECON_URL = process.env.RECON_ORCHESTRATOR_URL || 'http://recon-orchestrator:8010'
@@ -15,6 +16,8 @@ async function fetchStatus(url: string) {
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }

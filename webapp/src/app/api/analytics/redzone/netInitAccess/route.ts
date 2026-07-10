@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/app/api/graph/neo4j'
+import { guardProject } from '@/lib/access'
+import { getGraphSession } from '@/app/api/graph/neo4j'
 
 function toNum(val: unknown): number {
   if (val && typeof val === 'object' && 'low' in val) return (val as { low: number }).low
@@ -27,13 +28,15 @@ const NET_VULN_TYPES = [
 
 export async function GET(request: NextRequest) {
   const projectId = request.nextUrl.searchParams.get('projectId')
+  const __denied = await guardProject(projectId || '')
+  if (__denied) return __denied
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 })
   }
 
   const sensitivePorts = Object.keys(PORT_CATEGORY).map(Number)
 
-  const session = getSession()
+  const session = getGraphSession()
   try {
     // Part A: sensitive open ports (admin/db/mgmt/smtp/k8s etc.)
     const portResult = await session.run(
