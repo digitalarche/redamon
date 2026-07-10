@@ -23,6 +23,7 @@ run() {
 # Unit / integration (no running stack required)
 run "Unit: redamon.sh secret generation"        bash tests/redamon_secrets_test.sh
 run "Integration: host-port publish policy"      bash tests/test_port_bindings.sh
+run "Unit: docker-broker policy (T1/T2 mode)"    python3 docker_broker/test_policy.py
 run "Unit: MCP bearer middleware (ASGI)"         python3 mcp/servers/tests/test_auth_middleware.py
 run "Unit: agent MCP client auth wiring"         python3 agentic/tests/test_system_mcp_auth.py
 run "Integration: SSE auth round-trip (real MCP)" python3 mcp/servers/tests/test_sse_auth_integration.py
