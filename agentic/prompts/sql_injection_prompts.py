@@ -34,6 +34,38 @@ Tamper scripts: {sqli_tamper_scripts}
 
 ## MANDATORY SQL INJECTION WORKFLOW
 
+### Step 0: Triage the objective and the injection surface FIRST (decision gate)
+
+Before extracting anything, answer two questions and let them route the whole workflow.
+Do NOT default to dumping the database — extraction is one primitive, not the goal.
+
+**A. WHERE does the objective live?** (this determines the primitive, not the reverse)
+- **A database row** (a credential, token, or record stored in a table) -> boolean / UNION /
+  error-based extraction is appropriate; proceed with the extraction steps below.
+- **A filesystem artifact** (a secret/flag file, application source, or a config on disk)
+  **or the goal is code execution** -> char-by-char row extraction is the WRONG primitive.
+  Prefer, in order: file read (`LOAD_FILE`, `sqlmap --file-read`), file write / webshell drop
+  (`INTO OUTFILE`, `sqlmap --file-write`), or an **application-level pivot** to authenticated
+  functionality (file upload, import/export, admin actions, second-order sinks) that yields RCE
+  or a direct file read. Confirm the objective's location before spending iterations on blind
+  extraction.
+
+**B. Is the injectable surface a LOGIN / AUTH form with a content/boolean oracle?**
+If yes, the value of the injection is the ACCESS it unlocks, not the DB contents. FIRST test it
+as an **authentication bypass**, and if a session is granted, PIVOT immediately to the
+authenticated attack surface (Step 7) before any char-by-char extraction. Treat the bypass as an
+exhaustive sweep, NOT a single guess:
+- Test the bypass in **every injectable parameter** (username AND password AND any hidden field),
+  not just the first one.
+- Try **multiple payload shapes** per field: comment-out (`-- -`, `#`), always-true
+  (`' OR 1=1-- -`), balanced-parenthesis variants (close the extra `)` your context opened before
+  `OR` / `UNION`), and `UNION SELECT` of a constant row.
+- Login handlers frequently run **more than one query** (an existence check, THEN a credential
+  check) and may compute the password hash inside SQL. A payload that satisfies the first query
+  can leave the second intact, so the winning sink may be a **different field or the second
+  query**. A single failed comment payload does NOT prove bypass is impossible — you may only
+  conclude "no auth bypass" after the full (field x shape) sweep is on record.
+
 ### Step 1: Target Analysis (execute_curl)
 
 Send a baseline request to the target URL and capture the normal response:
@@ -163,9 +195,24 @@ For targeted extraction (faster than full dump):
 kali_shell("sqlmap -u 'TARGET_URL' --batch --random-agent -D dbname -T users --dump --threads=5")
 ```
 
+**Anti-deadlock — blind extraction is a last resort, and it is bounded:**
+Char-by-char boolean/time-based extraction is slow and easy to get stuck in. Before committing to
+it, re-confirm (Step 0-A) that the objective actually IS a database row. If schema enumeration
+shows no table/column that could hold the objective, or the objective is a filesystem artifact,
+STOP extracting and pivot — auth-bypass access, `LOAD_FILE` / `INTO OUTFILE`, or an app-level RCE
+surface. Do NOT keep extracting version / current-user / schema once they are no longer on the
+path to the objective; enumerating DBMS metadata is not progress toward a flag that is not in the DB.
+
 ### Step 7: Post-SQLi Escalation (if possible)
 
 Attempt these ONLY if initial exploitation succeeded:
+
+**Pivot to authenticated functionality (when the injection was an AUTH BYPASS):**
+Gaining a valid session IS an exploitation success. The highest-value next move is usually the
+app's own now-reachable authenticated features — file upload, import/export, profile/admin
+actions, or any sink that stores or reflects user input — which frequently lead to RCE or a
+direct file read faster than any further SQL. Enumerate the authenticated surface with the new
+session BEFORE returning to database work.
 
 **File read** (requires FILE privilege):
 ```
@@ -272,6 +319,12 @@ SQLI_PAYLOAD_REFERENCE = """
 ## SQLi Payload Reference
 
 ### Auth Bypass Payloads (login forms)
+**Sweep, do not single-shot.** Try EACH payload below in EVERY injectable field (username AND
+password), not just one field with one payload. Watch the app's own response differential as the
+oracle (a distinct success / redirect / session-set state vs a wrong-credentials state). Login
+logic may run multiple queries, so a payload that fails in one field can succeed in another — only
+declare "no auth bypass" after all (fields x shapes) are on record. A granted session is the win;
+pivot to the authenticated surface immediately.
 Use these with `execute_curl` to test login forms for authentication bypass:
 ```
 ' OR '1'='1'--
