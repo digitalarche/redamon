@@ -704,17 +704,8 @@ services:
       neo4j:
         condition: service_healthy
     restart: unless-stopped
-    # T15/D1: conservative sidecar hardening. cap_drop:ALL is safe — feed
-    # ingestion is pure userspace network + volume file I/O needing no Linux
-    # capabilities; no-new-privileges blocks setuid escalation; generous
-    # pids/mem stop a runaway ingest from starving co-located services.
-    # NOTE (residual): read_only rootfs + non-root user are intentionally NOT
-    # set here — ingestion loads the embedder, which writes a HuggingFace model
-    # cache, and a read-only root would break that. Tracked as residual.
     mem_limit: ${KB_REFRESH_MEM:-4g}
     pids_limit: ${KB_REFRESH_PIDS:-512}
-    security_opt:
-      - no-new-privileges:true
     cap_drop:
       - ALL
     networks:
@@ -790,6 +781,11 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-changeme}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-changeme}
       SCANNER_API_KEY: ${SCANNER_API_KEY:-changeme}  # S3/E6 scoped scanner token
+      # S2/E2: flip the internal-key route allowlist from log-only to enforce.
+      # Default false = fail-open rollout (the shipped behavior); set true in
+      # .env once logs confirm only known routes use the key. Wired here so it is
+      # reachable via .env (webapp has no env_file).
+      INTERNAL_KEY_ALLOWLIST_ENFORCE: ${INTERNAL_KEY_ALLOWLIST_ENFORCE:-false}
       # Signs short-lived agent-WebSocket tickets the agent verifies (STRIDE S6).
       # Dedicated secret (NOT AUTH_SECRET) so agent-side exposure can't forge
       # login cookies. Empty in dev → no ticket minted, agent fails open.
