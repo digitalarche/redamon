@@ -192,7 +192,7 @@ class TestTokenizerClamp:
         monkeypatch.setattr(
             mod,
             "CrossEncoder",
-            lambda name: _FakeCrossEncoder(model_max_length=tokenizer_max),
+            lambda name, revision=None: _FakeCrossEncoder(model_max_length=tokenizer_max),
         )
 
         r = mod.CrossEncoderReranker(
@@ -224,7 +224,7 @@ class TestTokenizerClamp:
         monkeypatch.setattr(
             mod,
             "CrossEncoder",
-            lambda name: _FakeCrossEncoder(model_max_length=10**30),
+            lambda name, revision=None: _FakeCrossEncoder(model_max_length=10**30),
         )
 
         r = mod.CrossEncoderReranker(

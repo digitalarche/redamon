@@ -32,6 +32,48 @@ UNIFIED_CACHE_FILENAME = "nvd_cache.json"
 NVD_SOURCE_PATH = f"knowledge_base/data/cache/nvd/{UNIFIED_CACHE_FILENAME}"
 
 
+class NVDSchemaError(ValueError):
+    """Raised when an NVD API response does not match the expected envelope.
+
+    NVD is a live NIST API (no commit-pin possible), so its integrity anchor is
+    strict response-shape validation: reject anything that is not the NVD v2
+    JSON envelope (e.g. an HTML error page, a proxy-injected payload, or a
+    tarball served with a JSON content-type). Caught by the existing per-window
+    handler → the window is skipped and the prior cache is preserved.
+    """
+
+
+def _validate_nvd_envelope(data) -> None:
+    """Validate the top-level shape of an NVD v2 API response.
+
+    T15: a poisoned upstream/proxy could return a syntactically-valid JSON body
+    that is not NVD-shaped. ``resp.json()`` already rejects non-JSON (HTML), and
+    this catches the valid-JSON-but-wrong-shape case before any record is
+    ingested. Deliberately shallow — it validates the envelope, not every CVE
+    field, so a legitimate NVD schema addition never trips it.
+    """
+    if not isinstance(data, dict):
+        raise NVDSchemaError(
+            f"NVD response is not a JSON object (got {type(data).__name__}) — "
+            f"refusing to ingest."
+        )
+    vulns = data.get("vulnerabilities")
+    if not isinstance(vulns, list):
+        raise NVDSchemaError(
+            "NVD response missing a list-typed 'vulnerabilities' field — "
+            "refusing to ingest (not an NVD v2 envelope)."
+        )
+    # 'format' is present on every genuine NVD v2 page; when present it must be
+    # the NVD marker. Absent is tolerated (older/edge responses) as long as the
+    # 'vulnerabilities' list check above held.
+    fmt = data.get("format")
+    if fmt is not None and fmt != "NVD_CVE":
+        raise NVDSchemaError(
+            f"NVD response 'format' is {fmt!r}, expected 'NVD_CVE' — "
+            f"refusing to ingest."
+        )
+
+
 class NVDClient(BaseClient):
     """Fetches CVE data from the NVD REST API."""
 
@@ -183,6 +225,7 @@ class NVDClient(BaseClient):
                     )
                     resp.raise_for_status()
                     data = resp.json()
+                    _validate_nvd_envelope(data)  # T15: reject non-NVD payloads
                     api_ok = True
                 except Exception as e:
                     msg = str(e)

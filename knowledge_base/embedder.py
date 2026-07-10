@@ -83,8 +83,18 @@ class Embedder:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            logger.info(f"Loading embedding model: {self.model_name}")
-            self._model = SentenceTransformer(self.model_name)
+            from knowledge_base.curation.pins import model_revision
+
+            # T15: pin the HuggingFace revision so we load a fixed commit rather
+            # than the moving branch head (unpinned models fall back to default
+            # with a warning). revision=None is the library default → identical
+            # to prior behaviour for any model not in the manifest.
+            revision = model_revision(self.model_name)
+            logger.info(
+                f"Loading embedding model: {self.model_name} "
+                f"(revision={revision or 'default'})"
+            )
+            self._model = SentenceTransformer(self.model_name, revision=revision)
 
             prefix_info = (
                 f"query='{self._query_prefix}' doc='{self._doc_prefix}'"

@@ -17,12 +17,16 @@ from knowledge_base.curation.file_cache import (
     safe_write_text,
     save_file_hashes,
 )
+from knowledge_base.curation.pins import PinMismatchError, get_feed_ref, verify_sha256
 from knowledge_base.curation.safe_http import MAX_TARBALL_BYTES, safe_get
 
 logger = logging.getLogger(__name__)
 
-NUCLEI_TEMPLATES_TARBALL_URL = (
-    "https://github.com/projectdiscovery/nuclei-templates/archive/refs/heads/main.tar.gz"
+# T15: pinned to an immutable commit (see pins.py) instead of the mutable
+# ``main`` branch head. Archive top dir becomes "nuclei-templates-<sha>/";
+# the member-path strip below splits on the first "/", so this is transparent.
+NUCLEI_TEMPLATES_TARBALL_URL_TEMPLATE = (
+    "https://github.com/projectdiscovery/nuclei-templates/archive/{ref}.tar.gz"
 )
 
 
@@ -50,16 +54,21 @@ class NucleiClient(BaseClient):
         return_all = kwargs.get("_return_all", False)
 
         # Download tarball (~30-40 MB, single request, generous timeout)
+        url = NUCLEI_TEMPLATES_TARBALL_URL_TEMPLATE.format(ref=get_feed_ref(self.SOURCE))
         try:
             logger.info("Downloading nuclei-templates repo tarball...")
             resp = safe_get(
-                NUCLEI_TEMPLATES_TARBALL_URL,
+                url,
                 timeout=300,
                 max_bytes=MAX_TARBALL_BYTES,
             )
             resp.raise_for_status()
             tarball_bytes = resp.content
+            # T15: verify before extraction. A mismatch aborts the feed.
+            verify_sha256(self.SOURCE, tarball_bytes)
             logger.info(f"Downloaded {len(tarball_bytes)} bytes")
+        except PinMismatchError:
+            raise
         except Exception as e:
             logger.error(f"Failed to download nuclei-templates tarball: {e}")
             return self._load_all_from_cache() if return_all else []

@@ -14,12 +14,14 @@ from knowledge_base.curation.file_cache import (
     safe_write_text,
     save_file_hashes,
 )
+from knowledge_base.curation.pins import PinMismatchError, get_feed_ref, verify_sha256
 from knowledge_base.curation.safe_http import MAX_TARBALL_BYTES, safe_get
 
 logger = logging.getLogger(__name__)
 
-WSTG_TARBALL_URL = (
-    "https://github.com/OWASP/wstg/archive/refs/heads/master.tar.gz"
+# T15: pinned to an immutable commit (see pins.py) instead of ``master`` head.
+WSTG_TARBALL_URL_TEMPLATE = (
+    "https://github.com/OWASP/wstg/archive/{ref}.tar.gz"
 )
 
 WSTG_TEST_DIR = "document/4-Web_Application_Security_Testing"
@@ -62,14 +64,18 @@ class OWASPClient(BaseClient):
         return_all = kwargs.get("_return_all", False)
 
         # Download tarball (~2MB, single request)
+        url = WSTG_TARBALL_URL_TEMPLATE.format(ref=get_feed_ref(self.SOURCE))
         try:
             logger.info("Downloading OWASP WSTG repo tarball...")
             resp = safe_get(
-                WSTG_TARBALL_URL, timeout=60, max_bytes=MAX_TARBALL_BYTES
+                url, timeout=60, max_bytes=MAX_TARBALL_BYTES
             )
             resp.raise_for_status()
             tarball_bytes = resp.content
+            verify_sha256(self.SOURCE, tarball_bytes)  # T15: abort on mismatch
             logger.info(f"Downloaded {len(tarball_bytes)} bytes")
+        except PinMismatchError:
+            raise
         except Exception as e:
             # Network failure: fall back to whatever is already in the cache
             logger.error(f"Failed to download OWASP WSTG tarball: {e}")

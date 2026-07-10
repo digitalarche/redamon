@@ -108,9 +108,17 @@ class CrossEncoderReranker:
         if self._model is not None:
             return
 
-        logger.info(f"Loading cross-encoder reranker: {self.model_name}")
+        from knowledge_base.curation.pins import model_revision
+
+        # T15: pin the HuggingFace revision (see embedder.py). revision=None is
+        # the library default, identical to prior behaviour when unpinned.
+        revision = model_revision(self.model_name)
+        logger.info(
+            f"Loading cross-encoder reranker: {self.model_name} "
+            f"(revision={revision or 'default'})"
+        )
         t0 = time.time()
-        self._model = CrossEncoder(self.model_name)
+        self._model = CrossEncoder(self.model_name, revision=revision)
 
         # Interrogate the tokenizer for its actual max_length. This is
         # the hard ceiling — asking for more tokens than the model can

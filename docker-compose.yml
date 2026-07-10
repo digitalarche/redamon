@@ -684,6 +684,19 @@ services:
       neo4j:
         condition: service_healthy
     restart: unless-stopped
+    # T15/D1: conservative sidecar hardening. cap_drop:ALL is safe — feed
+    # ingestion is pure userspace network + volume file I/O needing no Linux
+    # capabilities; no-new-privileges blocks setuid escalation; generous
+    # pids/mem stop a runaway ingest from starving co-located services.
+    # NOTE (residual): read_only rootfs + non-root user are intentionally NOT
+    # set here — ingestion loads the embedder, which writes a HuggingFace model
+    # cache, and a read-only root would break that. Tracked as residual.
+    mem_limit: ${KB_REFRESH_MEM:-4g}
+    pids_limit: ${KB_REFRESH_PIDS:-512}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       - redamon
     # Sleep loop scheduler — runs source updates on cadence.
