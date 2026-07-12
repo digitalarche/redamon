@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/session'
 import { createActAsToken, ACT_AS_COOKIE_NAME } from '@/lib/auth'
+import { writeActAsAudit } from '@/lib/audit'
 
 // Impersonation ("switch user") is an ADMIN-only, server-authorized act. The
 // client can no longer decide "which user am I" via a localStorage value: the
@@ -29,6 +30,8 @@ export async function POST(request: NextRequest) {
   }
 
   if (targetUserId === admin.userId) {
+    // Acting as self = stop simulating. Audit as an end event (R2).
+    await writeActAsAudit({ adminId: admin.userId, targetUserId, event: 'end', source: 'self-clear' })
     const res = NextResponse.json({ actingAs: null })
     res.cookies.set(ACT_AS_COOKIE_NAME, '', { ...COOKIE_OPTS, maxAge: 0 })
     return res
@@ -43,6 +46,7 @@ export async function POST(request: NextRequest) {
   }
 
   const token = await createActAsToken(admin.userId, targetUserId)
+  await writeActAsAudit({ adminId: admin.userId, targetUserId, event: 'start' })
   const res = NextResponse.json({ actingAs: targetUserId })
   res.cookies.set(ACT_AS_COOKIE_NAME, token, COOKIE_OPTS)
   return res
@@ -53,6 +57,9 @@ export async function DELETE() {
   const admin = await requireAdmin()
   if (admin instanceof NextResponse) return admin
 
+  // We don't know the impersonated target here (cookie is opaque to this route);
+  // record the end event attributed to the admin (R2).
+  await writeActAsAudit({ adminId: admin.userId, targetUserId: '', event: 'end' })
   const res = NextResponse.json({ actingAs: null })
   res.cookies.set(ACT_AS_COOKIE_NAME, '', { ...COOKIE_OPTS, maxAge: 0 })
   return res
