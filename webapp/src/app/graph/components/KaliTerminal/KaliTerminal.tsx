@@ -12,16 +12,42 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const BASE_RECONNECT_INTERVAL = 2000
 const PING_INTERVAL_MS = 30000
 
-function getWsUrl(): string {
+function getWsUrl(ticket?: string): string {
+  let base: string
   if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
-    return process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/kali-terminal')
-  }
-  if (typeof window !== 'undefined') {
+    base = process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/kali-terminal')
+  } else if (typeof window !== 'undefined') {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.hostname
-    return `${protocol}//${host}:8090/ws/kali-terminal`
+    base = `${protocol}//${host}:8090/ws/kali-terminal`
+  } else {
+    base = 'ws://localhost:8090/ws/kali-terminal'
   }
-  return 'ws://localhost:8090/ws/kali-terminal'
+  // STRIDE S3: the agent proxy requires a ws-ticket to open the PTY. Pass it as
+  // a query param so the raw byte bridge is unchanged.
+  if (ticket) {
+    base += (base.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticket)
+  }
+  return base
+}
+
+// STRIDE S3: mint a ws-ticket bound to the effective user + project before
+// opening the terminal socket (mirrors useAgentWebSocket). Returns null when the
+// mint fails (no project, unauthorized, or the secret is unset) — the caller
+// surfaces a connection error since the agent now fails closed.
+async function fetchKaliTicket(projectId: string, sessionId: string): Promise<string | null> {
+  try {
+    const resp = await fetch('/api/agent/ws-ticket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, sessionId }),
+    })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    return data?.ticket ?? null
+  } catch {
+    return null
+  }
 }
 
 export interface KaliTerminalProps {
@@ -45,6 +71,10 @@ export const KaliTerminal = memo(function KaliTerminal({ userId, projectId }: Ka
   const tenantRef = useRef<{ userId?: string | null; projectId?: string | null }>({ userId, projectId })
   tenantRef.current = { userId, projectId }
   const firstTenantRunRef = useRef(true)
+  // STRIDE S3: stable per-terminal session id for the ws-ticket `sid` claim.
+  const sessionIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `kali-${Date.now()}`
+  )
 
   const connect = useCallback(async () => {
     if (!termRef.current || !mountedRef.current) return
@@ -141,7 +171,23 @@ export const KaliTerminal = memo(function KaliTerminal({ userId, projectId }: Ka
     terminal.writeln('')
     terminal.writeln('\x1b[2;37m  Connecting to kali-sandbox...\x1b[0m')
 
-    const url = getWsUrl()
+    // STRIDE S3: mint a ws-ticket (bound to the effective user + project) before
+    // dialing. Without a valid ticket the agent proxy now closes the socket.
+    const pid = tenantRef.current.projectId
+    if (!pid) {
+      setStatus('error')
+      terminal.writeln('\x1b[1;31m✗ No project selected — open a project to use the terminal\x1b[0m')
+      return
+    }
+    const ticket = await fetchKaliTicket(String(pid), sessionIdRef.current)
+    if (!ticket) {
+      setStatus('error')
+      terminal.writeln('\x1b[1;31m✗ Terminal authentication failed (could not obtain a ticket)\x1b[0m')
+      return
+    }
+    if (!mountedRef.current) return
+
+    const url = getWsUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
 

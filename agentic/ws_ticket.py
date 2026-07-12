@@ -50,6 +50,59 @@ def warn_ticket_failopen_once() -> None:
         _warned_failopen = True
 
 
+def check_ws_origin(origin: Optional[str], host: Optional[str], extra_allowed=None) -> bool:
+    """Server-side WebSocket Origin check (CSWSH defense; STRIDE S3/S4).
+
+    CORSMiddleware does NOT cover WebSocket handshakes, so each WS endpoint must
+    validate Origin itself. Rule (per the remediation plan):
+
+    - A missing Origin is allowed: CSWSH is a browser-only attack and browsers
+      always send Origin on a cross-site WS; non-browser tooling (which sends no
+      Origin) is still gated by the ticket, the primary control.
+    - Same-origin is the primary allow rule: the Origin's hostname must equal the
+      hostname of the Host the connection was reached on (cross-PORT on the same
+      host is allowed, matching the local LAN posture where the UI is :3000 and
+      the agent is :8090). This avoids the local-LAN regression a strict
+      _cors_origins-only gate would cause.
+    - extra_allowed (e.g. AGENT_CORS_ORIGINS) is an explicit superset for genuine
+      cross-origin deployments.
+    """
+    if not origin:
+        return True
+    allowed = {o.strip() for o in (extra_allowed or []) if o and o.strip()}
+    if origin in allowed:
+        return True
+    try:
+        from urllib.parse import urlparse
+        origin_host = urlparse(origin).hostname
+    except Exception:
+        return False
+    if not origin_host or not host:
+        return False
+    host_only = host.split(":")[0]
+    return origin_host == host_only
+
+
+def authorize_ws(origin, host, ticket, extra_allowed=None):
+    """Combined WS gate for the raw-proxy endpoints (kali terminal, cypherfix):
+    same-origin check + fail-closed ticket verification.
+
+    Returns ``(ok, claims, reason)``: ``ok`` True only when the origin is allowed
+    AND a valid ticket verified against the configured secret. ``claims`` is the
+    verified claim dict on success (None otherwise). ``reason`` is a short string
+    for logging when rejected. Fails CLOSED when the secret is unset (S3/S4).
+    """
+    if not check_ws_origin(origin, host, extra_allowed):
+        return False, None, "disallowed origin"
+    secret = ticket_secret()
+    if not secret:
+        return False, None, "ticket auth not configured"
+    claims = verify_ws_ticket(ticket, secret)
+    if claims is None:
+        return False, None, "missing or invalid ticket"
+    return True, claims, "ok"
+
+
 def _b64url_decode(segment: str) -> bytes:
     padding = "=" * (-len(segment) % 4)
     return base64.urlsafe_b64decode(segment + padding)

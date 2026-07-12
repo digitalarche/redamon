@@ -2830,12 +2830,41 @@ async def kali_terminal_proxy(websocket: WebSocket):
     Proxy WebSocket connection to the kali-sandbox PTY terminal server.
 
     Bridges the browser ↔ agent ↔ kali-sandbox terminal for interactive shell access.
+
+    STRIDE S3: this proxy is the authentication chokepoint. Before accepting the
+    handshake or dialing the upstream PTY it requires a valid ws-ticket (query
+    param ``ticket``) and a same-origin request. An unset AGENT_WS_TICKET_SECRET
+    fails CLOSED (mirrors S2). Identity is taken from the verified claims, never
+    from the browser's self-asserted frame, and forwarded to the upstream.
     """
+    from ws_ticket import authorize_ws
+
+    # Same-origin + fail-closed ticket gate BEFORE accept()/upstream dial.
+    origin = websocket.headers.get("origin")
+    host = websocket.headers.get("host")
+    ticket = websocket.query_params.get("ticket")
+    ok, claims, reason = authorize_ws(origin, host, ticket, _cors_origins)
+    if not ok:
+        logger.warning("Rejected /ws/kali-terminal: %s (origin=%r host=%r)", reason, origin, host)
+        await websocket.close(code=1008)
+        return
+
+    # Identity from the VERIFIED ticket, forwarded to the upstream PTY as query
+    # params (never from the browser's self-asserted frame).
+    from urllib.parse import urlencode, urlparse
+    _tenant = urlencode({
+        "user_id": str(claims["sub"]),
+        "project_id": str(claims["pid"]),
+        "session_id": str(claims["sid"]),
+    })
+    _sep = "&" if urlparse(_KALI_TERMINAL_WS_URL).query else "?"
+    upstream_url = f"{_KALI_TERMINAL_WS_URL}{_sep}{_tenant}"
+
     await websocket.accept()
 
     try:
         async with websockets.connect(
-            _KALI_TERMINAL_WS_URL,
+            upstream_url,
             ping_interval=30,
             ping_timeout=60,
             max_size=2**20,
