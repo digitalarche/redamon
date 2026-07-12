@@ -633,6 +633,13 @@ ensure_db_secrets() {
     done
 }
 
+# S11: minimum admin-password length enforced at creation and reset.
+MIN_ADMIN_PASSWORD_LEN=12
+_password_strong_enough() {
+    local pw="$1"
+    [[ ${#pw} -ge $MIN_ADMIN_PASSWORD_LEN ]]
+}
+
 ensure_admin() {
     # Wait for webapp to be healthy
     local retries=0
@@ -659,8 +666,16 @@ ensure_admin() {
             echo ""
             read -srp "  Confirm password: " ADMIN_PASS2 </dev/tty
             echo ""
-            [[ "$ADMIN_PASS" == "$ADMIN_PASS2" ]] && break
-            warn "Passwords do not match. Try again."
+            if [[ "$ADMIN_PASS" != "$ADMIN_PASS2" ]]; then
+                warn "Passwords do not match. Try again."
+                continue
+            fi
+            # S11: reject a weak admin password (min length) instead of warning.
+            if ! _password_strong_enough "$ADMIN_PASS"; then
+                warn "Password too short (minimum ${MIN_ADMIN_PASSWORD_LEN} characters). Try again."
+                continue
+            fi
+            break
         done
         docker compose exec -T \
             -e "ADMIN_NAME=$ADMIN_NAME" \
@@ -682,6 +697,12 @@ cmd_reset_password() {
 
     if [[ "$NEW_PASS" != "$CONFIRM" ]]; then
         error "Passwords do not match."
+        exit 1
+    fi
+
+    # S11: enforce a minimum password strength on reset too.
+    if ! _password_strong_enough "$NEW_PASS"; then
+        error "Password too short (minimum ${MIN_ADMIN_PASSWORD_LEN} characters)."
         exit 1
     fi
 

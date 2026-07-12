@@ -33,6 +33,7 @@ vi.mock('@/lib/audit', () => ({
   writeActAsAudit: vi.fn(),
 }))
 
+import { __resetThrottle } from '@/lib/loginThrottle'
 import { POST } from './route'
 
 function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
@@ -45,6 +46,9 @@ function req(body: unknown, headers: Record<string, string> = {}): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  __resetThrottle()
+  vi.stubEnv('LOGIN_MAX_ATTEMPTS', '3')
+  vi.stubEnv('LOGIN_LOCKOUT_SECONDS', '900')
 })
 
 describe('POST /api/auth/login', () => {
@@ -83,5 +87,33 @@ describe('POST /api/auth/login', () => {
     const call = mockWriteAudit.mock.calls.find(c => c[0].action === 'auth.login.success')
     expect(call).toBeDefined()
     expect(call[0].actorId).toBe('u1')
+  })
+
+  test('S11: lockout after N failures -> 429 with Retry-After + lockout audit', async () => {
+    mockUserFindUnique.mockResolvedValue(null)
+    // 3 failures (threshold) from the same email + IP.
+    for (let i = 0; i < 3; i++) await POST(req({ email: 'brute@x.com', password: 'x' }))
+    // 4th is throttled BEFORE hitting the DB.
+    const res = await POST(req({ email: 'brute@x.com', password: 'x' }))
+    expect(res.status).toBe(429)
+    expect(res.headers.get('Retry-After')).toBeTruthy()
+    const lock = mockWriteAudit.mock.calls.find(c => c[0].action === 'auth.login.lockout')
+    expect(lock).toBeDefined()
+  })
+
+  test('S11: a successful login clears the counter', async () => {
+    // 2 failures, then success clears, so subsequent failures start fresh.
+    mockUserFindUnique.mockResolvedValueOnce(null)
+    await POST(req({ email: 'mix@x.com', password: 'bad' }))
+    mockUserFindUnique.mockResolvedValue({ id: 'u9', name: 'U', email: 'mix@x.com', password: '$2b$10$x', role: 'user' })
+    mockVerifyPassword.mockResolvedValue(true)
+    const ok = await POST(req({ email: 'mix@x.com', password: 'good' }))
+    expect(ok.status).toBe(200)
+    // Counter cleared: two more failures should NOT be locked yet (threshold 3).
+    mockUserFindUnique.mockResolvedValue(null)
+    mockVerifyPassword.mockResolvedValue(false)
+    await POST(req({ email: 'mix@x.com', password: 'bad' }))
+    const res = await POST(req({ email: 'mix@x.com', password: 'bad' }))
+    expect(res.status).toBe(401)
   })
 })

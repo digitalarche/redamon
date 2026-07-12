@@ -786,6 +786,13 @@ services:
       # .env once logs confirm only known routes use the key. Wired here so it is
       # reachable via .env (webapp has no env_file).
       INTERNAL_KEY_ALLOWLIST_ENFORCE: ${INTERNAL_KEY_ALLOWLIST_ENFORCE:-false}
+      # S11: login lockout / backoff thresholds. SAFE DEFAULTS so an unset value
+      # fails safe to a real limit, never to "no limit".
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-900}
+      # R5: mark X-Forwarded-For trustworthy only behind a proxy (public posture
+      # with nginx). Default false = local posture treats the IP as best-effort.
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       # Signs short-lived agent-WebSocket tickets the agent verifies (STRIDE S6).
       # Dedicated secret (NOT AUTH_SECRET) so agent-side exposure can't forge
       # login cookies. Empty in dev → no ticket minted, agent fails open.

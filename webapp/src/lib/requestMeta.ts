@@ -14,7 +14,8 @@ export interface ClientMeta {
 }
 
 function behindTrustedProxy(): boolean {
-  return process.env.TRUST_PROXY === '1' || process.env.DEPLOY_BEHIND_PROXY === '1'
+  const on = (v: string | undefined) => v === '1' || v === 'true'
+  return on(process.env.TRUST_PROXY) || on(process.env.DEPLOY_BEHIND_PROXY)
 }
 
 export function getClientMeta(request: NextRequest): ClientMeta {
