@@ -5,12 +5,14 @@
  * has loaded. Used by ToolMatrixSection to render dynamic phase toggles.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://agent:8080'
 
 export async function GET(_request: NextRequest) {
   try {
     const upstream = await fetch(`${AGENT_API_URL}/mcp/manifest`, {
+      headers: internalKeyHeaders(),
       signal: AbortSignal.timeout(10_000),
     })
     const data = await upstream.json().catch(() => ({}))

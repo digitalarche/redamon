@@ -6,6 +6,7 @@ import JSZip from 'jszip'
 import { randomUUID } from 'crypto'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import path from 'path'
+import { safeBasename } from '@/lib/safePath'
 import { orchestratorFetch } from '@/lib/orchestrator'
 
 export const maxDuration = 300
@@ -285,18 +286,26 @@ export async function POST(request: NextRequest) {
         }
 
         for (const rm of reportMeta) {
+          // The filename comes from the attacker-controllable import archive.
+          // Reject anything that is not a plain basename so a crafted
+          // `../../../app/evil.html` cannot escape REPORT_OUTPUT_PATH.
+          const safeName = safeBasename(rm.filename)
+          if (!safeName) {
+            console.warn('Skipping report with unsafe filename during import:', rm.filename)
+            continue
+          }
           const htmlFile = zip.file(`reports/${rm.filename}`)
           if (!htmlFile) continue
 
           const htmlContent = await htmlFile.async('nodebuffer')
-          const filePath = path.join(REPORT_OUTPUT_PATH, rm.filename)
+          const filePath = path.join(REPORT_OUTPUT_PATH, safeName)
           writeFileSync(filePath, htmlContent)
 
           await prisma.report.create({
             data: {
               projectId: newProject.id,
               title: rm.title,
-              filename: rm.filename,
+              filename: safeName,
               filePath,
               fileSize: htmlContent.length,
               format: rm.format || 'html',

@@ -12,25 +12,26 @@
 <br/>
 
 <p align="center">
+  <a href="https://trendshift.io/repositories/21794?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-21794" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/21794/daily?language=Python" alt="samugit83%2Fredamon | Trendshift" width="250" height="55"/></a>
+</p>
+
+<p align="center">
   <a href="https://www.redamon.org/"><img height="34" src="https://img.shields.io/badge/🌐_Website-redamon.org-A01025?style=for-the-badge&labelColor=000000" alt="RedAmon Website"/></a>
   <a href="https://discord.com/invite/dxSrH2gaC"><img height="34" src="https://img.shields.io/badge/Discord-Join_Community-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=000000" alt="Discord Community"/></a>
   <a href="https://t.me/redamon_ai"><img height="34" src="https://img.shields.io/badge/Telegram-Join_Channel-26A5E4?style=for-the-badge&logo=telegram&logoColor=white&labelColor=000000" alt="Telegram Channel"/></a>
 </p>
 
 <p align="center">
-  <a href="https://trendshift.io/repositories/21794?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-21794" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/21794/daily?language=Python" alt="samugit83%2Fredamon | Trendshift" width="250" height="55"/></a>
-</p>
-
-<p align="center">
   <a href="https://github.com/samugit83/redamon/stargazers"><img height="24" src="https://img.shields.io/github/stars/samugit83/redamon?style=flat&color=2E8B57&label=Stars" alt="GitHub Stars"/></a>
-  <img height="24" src="https://img.shields.io/badge/v5.5.0-release-2E8B57?style=flat" alt="Version 5.5.0"/>
+  <img height="24" src="https://img.shields.io/badge/v6.0.0-release-2E8B57?style=flat" alt="Version 6.0.0"/>
   <img height="24" src="https://img.shields.io/badge/WARNING-SECURITY%20TOOL-B22222?style=flat" alt="Security Tool Warning"/>
   <img height="24" src="https://img.shields.io/badge/LICENSE-MIT-4169A1?style=flat" alt="MIT License"/>
+  <a href="readmes/README.SECURITY_POSTURE.md"><img height="24" src="https://img.shields.io/badge/SECURE%20BY%20DESIGN-STRIDE%20THREAT%20MODELED-2E7D32?style=flat&logo=shield&logoColor=white" alt="Secure by Design, STRIDE Threat Modeled"/></a>
   <img height="24" src="https://img.shields.io/badge/END--TO--END-PIPELINE-A01025?style=flat" alt="End-to-End Pipeline"/>
   <img height="24" src="https://img.shields.io/badge/AI-AUTONOMOUS%20AGENT-6A5ACD?style=flat&logo=openai&logoColor=white" alt="AI Powered"/>
   <a href="https://github.com/samugit83/redamon/wiki/AI-Gauntlet"><img height="24" src="https://img.shields.io/badge/%F0%9F%86%95%20AI%20GAUNTLET-OFFENSIVE%20AI%20TESTING-FF6B35?style=flat" alt="AI Gauntlet — Offensive AI Testing"/></a>
   <a href="https://github.com/samugit83/redamon/wiki/Fireteam-Parallel-Specialists"><img height="24" src="https://img.shields.io/badge/%F0%9F%94%A5%20FIRETEAM-PARALLEL%20MULTI--AGENT-7C3AED?style=flat" alt="Fireteam Parallel Multi-Agent"/></a>
-  <img height="24" src="https://img.shields.io/badge/CONFIGURABLE-AUTONOMY-CC7722?style=flat" alt="Configurable Autonomy"/>
+  <a href="redamon.wiki/Deploying-to-a-Server.md"><img height="24" src="https://img.shields.io/badge/%F0%9F%9A%80%20ONE%20COMMAND-DEPLOY%20ON%20SERVER-CC7722?style=flat" alt="One Command Deploy on Server"/></a>
   <img height="24" src="https://img.shields.io/badge/Kali-Powered-466A7A?style=flat&logo=kalilinux&logoColor=white" alt="Kali Powered"/>
   <img height="24" src="https://img.shields.io/badge/Docker-Compose-1A7EC2?style=flat&logo=docker&logoColor=white" alt="Docker"/>
   <img height="24" src="https://img.shields.io/badge/IP%2FCIDR-TARGETING-0D7377?style=flat" alt="IP/CIDR Targeting"/>
@@ -259,6 +260,19 @@ The script pulls the latest code from GitHub, detects which Dockerfiles and sour
 
 The webapp also checks for updates automatically and shows a notification in the UI when a new version is available.
 
+### Deploy to a Server (Production)
+
+The Quick Start above runs RedAmon locally on `localhost`. To run a shared, internet-reachable instance on a Linux server (EC2, DigitalOcean, Hetzner, or bare metal), use the **single-host deploy** in [`deploy/single-host/`](deploy/single-host/). It drives `redamon.sh` over SSH from your laptop and wraps the stack in the internet-facing security layer RedAmon omits by default: nginx + TLS (Let's Encrypt), a host firewall, SSH hardening, and fail2ban, with a single public HTTPS origin so only the login page is reachable and everything else stays bound to loopback.
+
+```bash
+cd deploy/single-host
+cp .env.example .env      # set HOST_IP, DOMAIN, SSH_KEY_PATH, OPERATOR_ALLOW_CIDRS,
+                          # LETSENCRYPT_EMAIL, ADMIN_* ...
+./deploy.sh init          # first build takes 30-60 min, then log in at https://<domain>/
+```
+
+Full walkthrough: [Wiki: Deploying to a Server](https://github.com/samugit83/redamon/wiki/Deploying-to-a-Server). Complete reference: [deploy/single-host/README.md](deploy/single-host/README.md).
+
 ### Development Mode
 
 For contributors and active development with **Next.js fast refresh**:
@@ -376,6 +390,8 @@ KB_EMBEDDING_API_MODEL=nomic-embed-text
 
 - [Full Wiki Documentation](https://github.com/samugit83/redamon/wiki)
 - [Overview](#overview)
+- [Built for Enterprise, Secure by Design](#built-for-enterprise-secure-by-design)
+- [Security & Threat Model](#security--threat-model)
 - [Feature Highlights](#feature-highlights)
 - [System Architecture](#system-architecture)
 - [Components](#components)
@@ -401,6 +417,48 @@ The platform is built around six pillars:
 | **EvoGraph** | A persistent, evolutionary attack chain graph in Neo4j that tracks every step, finding, decision, and failure across the attack lifecycle, bridging the recon graph and enabling cross-session intelligence accumulation. |
 | **CypherFix** | Automated vulnerability remediation pipeline: an AI triage agent correlates and prioritizes findings from the graph, then a CodeFix agent clones the target repository, implements fixes using a ReAct loop with 11 code tools, and opens a GitHub pull request. |
 | **Project Settings Engine** | 500+ per-project parameters (exposed through the webapp UI) that control every tool's behavior, from Naabu thread counts to Nuclei severity filters to agent approval gates. |
+
+---
+
+## Built for Enterprise, Secure by Design
+
+RedAmon is engineered to drop into a real security organization, not just a researcher's laptop.
+
+- **Secure by design, STRIDE threat-modeled.** The whole platform is assessed end to end under STRIDE and hardened in independently verified waves: code-level privilege separation, a filtering Docker broker in front of the host socket, fail-closed auth, SSRF egress guards, secret redaction, append-only audit trails, and a non-disableable guardrail that blocks government, military, and intergovernmental targets. See the [Security Posture](readmes/README.SECURITY_POSTURE.md) and [Threat Model](readmes/README.TM.SYSTEM_OVERVIEW.md).
+- **Fully isolated and containerized.** Every tool, scanner, and agent runs in its own container with no host-level execution. Scan jobs are spawned as ephemeral sibling containers with their own filesystem and network namespace, then torn down on completion, keeping the host clean and containing the blast radius of any exploit.
+- **Governed and multi-tenant.** Multi-user / multi-project tenancy with admin and standard roles, DB-level `user_id + project_id` scoping on every node, Rules-of-Engagement enforcement, human-in-the-loop approval gates, and 500+ per-project settings give teams the control an enterprise engagement requires.
+
+**Deploy to a server in one command.** Beyond local `localhost`, RedAmon ships a hardened [single-host deploy](deploy/single-host/) that stands up a shared, internet-reachable instance and wraps the stack in nginx + TLS (Let's Encrypt), a host firewall, SSH hardening, and fail2ban, exposing a single public HTTPS origin:
+
+```bash
+cd deploy/single-host
+cp .env.example .env      # set DOMAIN, HOST_IP, SSH_KEY_PATH, ADMIN_* ...
+./deploy.sh init          # builds the full stack and brings it up over SSH
+```
+
+Full walkthrough: [Wiki: Deploying to a Server](https://github.com/samugit83/redamon/wiki/Deploying-to-a-Server).
+
+---
+
+## Security & Threat Model
+
+RedAmon is offensive software, so we hold it to the standard it tests others by. It is engineered **secure by design** and has been assessed end to end under the **STRIDE** methodology (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege), with findings remediated in sequenced, independently verified waves.
+
+This is not a marketing claim. It is grounded in a published, evidence-based analysis you can read:
+
+- **[Security Posture](readmes/README.SECURITY_POSTURE.md)** - the full defense-in-depth control catalog: every layer implemented, mapped to the code.
+- **[Threat Model](readmes/README.TM.SYSTEM_OVERVIEW.md)** - the assets, trust boundaries, data flows, entry points, and network surface the analysis was built on.
+
+Highlights of what is implemented:
+
+- **Code-level privilege separation.** The target-facing worker is the least trusted component and holds no secrets; a filtering docker-broker stands between the orchestrator and the host Docker socket (image allowlist, denies `--privileged`, host-root binds, dangerous capabilities).
+- **Two deployment postures, one trust model.** Local (backends bound to loopback) and a hardened [public-internet deploy](deploy/single-host/) that adds nginx + TLS, an operator gate, login rate-limiting, and a single public origin.
+- **Fail-closed by default.** Unset auth tokens reject rather than serve, default database credentials are refused and rotated, WebSockets require a signed ticket plus a server-side same-origin check, and every request is scoped to its authenticated owner (per-user access control with anti-enumeration 404s).
+- **Defense in depth.** SSRF egress guards, secret redaction in logs, append-only audit trails, container-escape hardening, decompression and concurrency caps, and supply-chain pinning (sha256 + commit pins).
+- **A non-disableable hard guardrail** blocks government, military, and intergovernmental targets regardless of configuration.
+- **Verified, release-gated remediation.** Fixes ship in sequenced waves, each independently verified with live exploit reproduction before and after the patch. See the [Changelog](CHANGELOG.md) security entries.
+
+Found a vulnerability? See our [Security Policy](SECURITY.md) for private disclosure.
 
 ---
 
@@ -830,6 +888,10 @@ flowchart TB
 | Resource | Link |
 |----------|------|
 | **Full Wiki** (user guide) | **[github.com/samugit83/redamon/wiki](https://github.com/samugit83/redamon/wiki)** |
+| Server Deployment (single-host) | **[Wiki: Deploying to a Server](https://github.com/samugit83/redamon/wiki/Deploying-to-a-Server)** · [deploy/single-host/README.md](deploy/single-host/README.md) |
+| **Security Posture** (defense-in-depth catalog) | **[readmes/README.SECURITY_POSTURE.md](readmes/README.SECURITY_POSTURE.md)** |
+| Threat Model (STRIDE) | [readmes/README.TM.SYSTEM_OVERVIEW.md](readmes/README.TM.SYSTEM_OVERVIEW.md) |
+| Security Policy | [SECURITY.md](SECURITY.md) |
 | AI-Assisted Development | **[Wiki: Ship Perfect PRs with AI](https://github.com/samugit83/redamon/wiki/AI-Assisted-Development)** |
 | Developer Guide | [readmes/README.DEV.md](readmes/README.DEV.md) |
 | Architecture Diagrams | [readmes/ARCHITECTURE.md](readmes/ARCHITECTURE.md) |
@@ -921,7 +983,7 @@ For questions, feedback, or collaboration inquiries: **devergo.sam@gmail.com**
 
 ## Legal
 
-> **LOCAL USE ONLY**: RedAmon is designed to run on a **local machine** and has **not** been hardened for server or cloud deployment. It lacks the security controls required for a production environment exposed to the internet (e.g. authentication hardening, rate limiting, TLS enforcement, input sanitization across all surfaces). **Do not deploy RedAmon on a public-facing server.** Running it outside a trusted local network is entirely at your own risk.
+> **Local by default; server deployment has a supported hardened path.** Out of the box RedAmon is meant to run on a **local machine** and does not include internet-facing security controls on its own. To run it on a public, internet-reachable server, use the **hardened single-host deploy** in [`deploy/single-host/`](deploy/single-host/), which puts the whole stack behind nginx + TLS, a host firewall, SSH hardening, and a single public HTTPS origin, with every internal service bound to loopback. Running the **raw** stack (without that deploy) on a public IP would expose unauthenticated internal services, so anything outside a trusted local network without the hardened deploy is entirely at your own risk.
 
 This project is released under the [MIT License](LICENSE).
 

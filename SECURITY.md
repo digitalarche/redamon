@@ -4,10 +4,10 @@
 
 RedAmon follows a rolling-release model. Only the **latest version** on the `master` branch receives security updates.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 2.1.x   | :white_check_mark: |
-| < 2.1   | :x:                |
+| Version                       | Supported          |
+| ----------------------------- | ------------------ |
+| Latest release on `master`    | :white_check_mark: |
+| Any older version             | :x:                |
 
 If you are running an older version, please update to the latest release before reporting issues. See the [Updating to a New Version](README.md#updating-to-a-new-version) section.
 

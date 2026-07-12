@@ -1372,7 +1372,7 @@ async def tradecraft_verify(body: TradecraftVerifyRequest):
         )
 
 
-@app.get("/mcp/manifest", tags=["MCP"])
+@app.get("/mcp/manifest", tags=["MCP"], dependencies=[Depends(require_internal_auth_only)])
 async def get_mcp_manifest():
     """
     Return the current MCP server manifest as seen by the agent.
@@ -1390,7 +1390,7 @@ async def get_mcp_manifest():
     }
 
 
-@app.post("/mcp/reload", tags=["MCP"])
+@app.post("/mcp/reload", tags=["MCP"], dependencies=[Depends(require_internal_auth_only)])
 async def reload_mcp_manifest(payload: dict = None):
     """
     Re-merge system + user MCP servers and reconnect the MCP client.
@@ -1414,7 +1414,7 @@ async def reload_mcp_manifest(payload: dict = None):
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
-@app.post("/mcp/test", tags=["MCP"])
+@app.post("/mcp/test", tags=["MCP"], dependencies=[Depends(require_internal_auth_only)])
 async def test_mcp_server(server: dict):
     """
     Test connectivity to a single MCP server draft (NOT yet persisted).

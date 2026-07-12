@@ -8,7 +8,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
-import { mcpServerSchema, validateMcpServers, MASK_PREFIX, type MCPServer } from '@/lib/mcp/schema'
+import { mcpServerSchema, validateMcpServers, type MCPServer } from '@/lib/mcp/schema'
+import { internalKeyHeaders } from '@/lib/agentAuth'
+import { maskMcpServersForApi, restoreMaskedToken } from '@/lib/mcp/mask'
+
+// Re-exported for the per-server [serverId] route which imports from here.
+export { maskMcpServersForApi, restoreMaskedToken }
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://agent:8080'
 
@@ -21,42 +26,12 @@ async function fireReload(userMcpServers: unknown) {
   try {
     await fetch(`${AGENT_API_URL}/mcp/reload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ userMcpServers }),
     })
   } catch (e) {
     console.warn('Failed to ping agent /mcp/reload:', e)
   }
-}
-
-/** Mask a secret showing only the last 4 characters (matches user_settings route). */
-function maskSecret(value: string): string {
-  if (!value) return ''
-  if (value.length <= 4) return '••••'
-  return '••••••••' + value.slice(-4)
-}
-
-/** Replace literal auth.token values with masked placeholders in-place. */
-export function maskMcpServersForApi(servers: MCPServer[]): MCPServer[] {
-  return servers.map(srv => {
-    if (srv.auth && srv.auth.token) {
-      return { ...srv, auth: { ...srv.auth, token: maskSecret(srv.auth.token) } }
-    }
-    return srv
-  })
-}
-
-/** When the user submits a server with a masked token (••••), preserve the
- *  existing one from the DB rather than writing the placeholder. */
-export function restoreMaskedToken(incoming: MCPServer, existing: MCPServer | undefined): MCPServer {
-  if (!incoming.auth || !incoming.auth.token) return incoming
-  if (!incoming.auth.token.startsWith(MASK_PREFIX)) return incoming
-  if (existing?.auth?.token) {
-    return { ...incoming, auth: { ...incoming.auth, token: existing.auth.token } }
-  }
-  // Masked sent for a server with no prior token — strip the placeholder so
-  // the schema's at-least-one validator triggers.
-  return { ...incoming, auth: { ...incoming.auth, token: undefined } }
 }
 
 export async function GET(request: NextRequest, { params }: RouteParams) {

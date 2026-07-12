@@ -4,6 +4,12 @@ import prisma from '@/lib/prisma'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8090'
 
+// Mirror the caps the manual POST path enforces so bulk import cannot be used
+// to bypass them (content size, per-user ceiling, description length).
+const MAX_CONTENT_SIZE = 50 * 1024 // 50KB
+const MAX_SKILLS_PER_USER = 50
+const MAX_DESCRIPTION = 500
+
 interface RouteParams {
   params: Promise<{ id: string }>
 }
@@ -41,9 +47,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     let imported = 0
     let skipped = 0
+    let total = existingSkills.length
 
     for (const skill of skills) {
       if (existingNames.has(skill.name)) {
+        skipped++
+        continue
+      }
+
+      if (total >= MAX_SKILLS_PER_USER) {
         skipped++
         continue
       }
@@ -63,17 +75,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
         const skillData = await contentRes.json()
 
+        const content = typeof skillData.content === 'string' ? skillData.content : ''
+        if (!content || content.length > MAX_CONTENT_SIZE) {
+          skipped++
+          continue
+        }
+        const rawDescription = skillData.description || skill.description || null
+        const description = typeof rawDescription === 'string'
+          ? rawDescription.slice(0, MAX_DESCRIPTION)
+          : null
+
         await prisma.userChatSkill.create({
           data: {
             userId: id,
             name: skillData.name || skill.name,
-            description: skillData.description || skill.description || null,
+            description,
             category: skillData.category || skill.category || 'general',
-            content: skillData.content,
+            content,
           },
         })
 
         imported++
+        total++
       } catch {
         skipped++
       }

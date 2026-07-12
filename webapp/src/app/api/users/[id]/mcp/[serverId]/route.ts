@@ -9,6 +9,7 @@ import { requireUserAccess } from '@/lib/session'
 import prisma from '@/lib/prisma'
 import { mcpServerSchema, validateMcpServers, type MCPServer } from '@/lib/mcp/schema'
 import { maskMcpServersForApi, restoreMaskedToken } from '../route'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://agent:8080'
 
@@ -20,7 +21,7 @@ async function fireReload(userMcpServers: unknown) {
   try {
     await fetch(`${AGENT_API_URL}/mcp/reload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ userMcpServers }),
     })
   } catch (e) {

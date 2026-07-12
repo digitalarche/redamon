@@ -30,12 +30,20 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
     const fileBuffer = readFileSync(report.filePath)
 
+    // Report HTML is template-generated but embeds target-influenced strings,
+    // so serve it defensively: block MIME sniffing and neutralize any stored
+    // XSS with a restrictive CSP (no scripts, no framing, no external loads).
+    // Reports are static HTML + inline styles, so this does not affect
+    // legitimate rendering.
     return new Response(fileBuffer, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Disposition': `inline; filename="${report.filename}"`,
         'Content-Length': String(fileBuffer.length),
         'Cache-Control': 'no-cache',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy':
+          "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       },
     })
   } catch (error) {

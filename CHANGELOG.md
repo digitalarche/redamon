@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-07-12
+
+### Security
+
+- **STRIDE remediation and threat model complete.** With wave 2 shipped ([5.5.0]), the STRIDE pass over RedAmon is closed: every enumerated threat is either remediated (fail-closed) or an explicitly accepted, documented residual. The threat model is finalized in [internal/security/README.TM.STRIDE.md](internal/security/README.TM.STRIDE.md), with the system-level view in [readmes/README.TM.SYSTEM_OVERVIEW.md](readmes/README.TM.SYSTEM_OVERVIEW.md).
+- **Consolidated security posture** published in [readmes/README.SECURITY_POSTURE.md](readmes/README.SECURITY_POSTURE.md) - a single reference for the enforced controls (auth, tenant isolation, fail-closed secrets, WS ticketing, rate/spend limits, audit logging), the trust boundaries, and the accepted residuals with their rationale.
+
+### Added
+
+- **Single-host deploy pipeline** under [deploy/single-host/](deploy/single-host/): a one-command `./deploy.sh init` that provisions and hardens a fresh host end to end (repo checkout, `redamon.sh` install, host tuning). Configuration is a single deploy-time `.env` with four public-access modes (`https-domain` / `https-ip` / `http-domain` / `http-ip`), TLS via Let's Encrypt / provided / self-signed, and defense-in-depth host hardening: nginx access gate + ufw allow-lists, key-only SSH, fail2ban, unattended security upgrades, and per-run shredding of the remote secrets. Idempotent `install` / `update` / `dev` flows converge to the same fully-enforced state.
+
+---
+
 ## [5.5.0] - 2026-07-12
 
 ### Security

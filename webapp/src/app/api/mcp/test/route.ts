@@ -8,6 +8,8 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { requireUserAccess } from '@/lib/session'
+import { internalKeyHeaders } from '@/lib/agentAuth'
 import { MASK_PREFIX, type MCPServer } from '@/lib/mcp/schema'
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://agent:8080'
@@ -23,6 +25,14 @@ export async function POST(request: NextRequest) {
         { ok: false, error: 'request body must include `server`', discovered_tools: [], warnings: [], elapsed_ms: 0 },
         { status: 400 },
       )
+    }
+
+    // The caller may only act on their OWN saved MCP secrets. Without this the
+    // body-supplied userId could restore another user's token from the DB and
+    // echo it to the agent test-spawn path (cross-tenant secret exposure).
+    if (userId) {
+      const denied = await requireUserAccess(request, userId)
+      if (denied) return denied
     }
 
     // If the user clicked Test on a saved server, the token field is the
@@ -54,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     const upstream = await fetch(`${AGENT_API_URL}/mcp/test`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: internalKeyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(35_000),
     })

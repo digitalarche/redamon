@@ -5,7 +5,7 @@
  */
 
 import { describe, test, expect } from 'vitest'
-import { injectProjectFilter } from './injectProjectFilter'
+import { injectProjectFilter, findUnscopedNodePattern } from './injectProjectFilter'
 
 describe('injectProjectFilter', () => {
   test('injects project_id into bare node pattern', () => {
@@ -89,5 +89,83 @@ describe('injectProjectFilter', () => {
     const result = injectProjectFilter(input)
     expect(result).toContain('(v:Vulnerability {project_id: $projectId, severity: "critical"})')
     expect(result).toContain('LIMIT 50')
+  })
+})
+
+describe('injectProjectFilter — cross-tenant node patterns (regression)', () => {
+  test('scopes an UNLABELED variable node (the leak vector)', () => {
+    // Previously (n) got no project_id and could read across tenants.
+    expect(injectProjectFilter('MATCH (n) RETURN n')).toBe(
+      'MATCH (n {project_id: $projectId}) RETURN n'
+    )
+  })
+
+  test('scopes an unlabeled variable node with existing props', () => {
+    expect(injectProjectFilter('MATCH (n {name: "x"}) RETURN n')).toBe(
+      'MATCH (n {project_id: $projectId, name: "x"}) RETURN n'
+    )
+  })
+
+  test('scopes a label-only node (no variable)', () => {
+    expect(injectProjectFilter('MATCH (:Host) RETURN 1')).toBe(
+      'MATCH (:Host {project_id: $projectId}) RETURN 1'
+    )
+  })
+
+  test('scopes an anonymous node in a relationship path', () => {
+    const out = injectProjectFilter('MATCH (a:Host)-[:R]->() RETURN a')
+    expect(out).toContain('(a:Host {project_id: $projectId})')
+    expect(out).toContain('({project_id: $projectId})')
+  })
+
+  test('does NOT double-inject an already-scoped node', () => {
+    const input = 'MATCH (n:Host {project_id: $projectId}) RETURN n'
+    expect(injectProjectFilter(input)).toBe(input)
+  })
+
+  test('does NOT mangle a function call like count(n)', () => {
+    const input = 'MATCH (n:Host) RETURN count(n)'
+    const out = injectProjectFilter(input)
+    expect(out).toContain('(n:Host {project_id: $projectId})')
+    expect(out).toContain('count(n)')
+    expect(out).not.toContain('count(n {')
+  })
+
+  test('does NOT mangle a parenthesized WHERE expression', () => {
+    const input = 'MATCH (n:Host) WHERE (n.port > 1000) RETURN n'
+    const out = injectProjectFilter(input)
+    expect(out).toContain('(n.port > 1000)')
+  })
+})
+
+describe('findUnscopedNodePattern', () => {
+  test('flags a raw unlabeled variable node before injection', () => {
+    expect(findUnscopedNodePattern('MATCH (n) RETURN n')).toBe('n')
+  })
+
+  test('flags a raw labeled node before injection', () => {
+    expect(findUnscopedNodePattern('MATCH (h:Host) RETURN h')).toBe('h:Host')
+  })
+
+  test('returns null once injectProjectFilter has scoped the query', () => {
+    const cases = [
+      'MATCH (n) RETURN n',
+      'MATCH (h:Host)-[:R]->(s:Svc) RETURN h, s',
+      'MATCH (h:Host)-[:R]->() RETURN h',
+      'MATCH (:Host) RETURN 1',
+      'MATCH (t:Technology)-[:HAS_KNOWN_CVE]->(c:CVE) RETURN t, c',
+      'MATCH (n:Host) RETURN count(n)',
+    ]
+    for (const q of cases) {
+      expect(findUnscopedNodePattern(injectProjectFilter(q))).toBeNull()
+    }
+  })
+
+  test('exempts global reference labels', () => {
+    expect(findUnscopedNodePattern('MATCH (c:CVE) RETURN c')).toBeNull()
+  })
+
+  test('does not flag anonymous waypoint nodes (no var, no label)', () => {
+    expect(findUnscopedNodePattern('MATCH (h:Host {project_id: $projectId})-[:R]->() RETURN h')).toBeNull()
   })
 })

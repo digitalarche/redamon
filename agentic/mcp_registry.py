@@ -433,8 +433,10 @@ def _mask_secret(value: str) -> str:
 
 def redact_for_api(servers: List[MCPServer]) -> List[Dict[str, Any]]:
     """
-    Render servers safe for API responses: literal auth tokens masked,
-    env-var names kept (they're references, not secrets).
+    Render servers safe for API responses. Every secret-bearing value is masked:
+    the literal auth token, custom header values (they routinely carry API keys),
+    and stdio env values. Header/env *keys* are kept (they are references, not
+    secrets) so the manifest still describes the server's shape.
     """
     out: List[Dict[str, Any]] = []
     for srv in servers:
@@ -442,5 +444,11 @@ def redact_for_api(servers: List[MCPServer]) -> List[Dict[str, Any]]:
         auth = d.get("auth")
         if isinstance(auth, dict) and auth.get("token"):
             auth["token"] = _mask_secret(auth["token"])
+        hdrs = d.get("headers")
+        if isinstance(hdrs, dict) and hdrs:
+            d["headers"] = {k: _mask_secret(str(v)) for k, v in hdrs.items()}
+        env = d.get("env")
+        if isinstance(env, dict) and env:
+            d["env"] = {k: _mask_secret(str(v)) for k, v in env.items()}
         out.append(d)
     return out

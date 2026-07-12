@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGraphSession } from '../../graph/neo4j'
 import { formatGraphRecords } from '../../graph/format'
-import { injectProjectFilter } from './injectProjectFilter'
+import { injectProjectFilter, findUnscopedNodePattern } from './injectProjectFilter'
 import { requireEffectiveUser, requireProjectAccess } from '@/lib/access'
 
 /**
@@ -40,6 +40,17 @@ export async function POST(request: NextRequest) {
 
     // Inject project_id filter into every node pattern in the Cypher query.
     const filtered = injectProjectFilter(cypherQuery)
+
+    // Fail closed: if any node pattern remains that could surface cross-tenant
+    // nodes (a variable/label with no project_id predicate), refuse the query
+    // rather than leak another tenant's subgraph.
+    const unscoped = findUnscopedNodePattern(filtered)
+    if (unscoped) {
+      return NextResponse.json(
+        { error: `Query contains a node pattern that cannot be tenant-scoped: (${unscoped})` },
+        { status: 400 }
+      )
+    }
 
     const session = getGraphSession()
     try {

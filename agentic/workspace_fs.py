@@ -1057,6 +1057,23 @@ async def fs_extract(archive_path: str, dest: str, format: str = "auto") -> str:
         candidate = (dest_p / member_name).resolve()
         return candidate == dest_resolved or dest_resolved in candidate.parents
 
+    def _safe_link(member) -> bool:
+        # A tar entry may be a symlink/hardlink whose *target* escapes dest even
+        # when its name does not (e.g. a link named "ok" pointing at
+        # "../../etc/passwd"). extractall(filter="data") guards this on 3.12+,
+        # but we validate explicitly so the check holds on every runtime.
+        link = getattr(member, "linkname", "") or ""
+        if not link:
+            return True
+        if os.path.isabs(link):
+            return False
+        if member.issym():
+            base = dest_p / os.path.dirname(member.name)
+        else:  # hardlink target is relative to the archive root
+            base = dest_p
+        candidate = (base / link).resolve()
+        return candidate == dest_resolved or dest_resolved in candidate.parents
+
     # D10: zip/tar-bomb defense. Cap entry count and total DECLARED uncompressed
     # size before extracting, and stream the gz path with a byte ceiling, so a
     # small crafted archive cannot inflate to tens of GB and OOM the agent. Env-
@@ -1075,7 +1092,17 @@ async def fs_extract(archive_path: str, dest: str, format: str = "auto") -> str:
             for m in members:
                 if not _safe(m.name):
                     return f"Error: tar-slip attempt detected for entry '{m.name}'. Aborted."
-            tf.extractall(dest_p)
+                if (m.issym() or m.islnk()) and not _safe_link(m):
+                    return f"Error: unsafe link target in entry '{m.name}' -> '{m.linkname}'. Aborted."
+            try:
+                # filter="data" (Python 3.12+) also strips setuid/dev nodes and
+                # re-validates link targets; fall back cleanly on older runtimes
+                # where our explicit name+link checks above already apply.
+                tf.extractall(dest_p, filter="data")
+            except TypeError:
+                tf.extractall(dest_p)
+            except Exception as e:
+                return f"Error: tar extraction blocked by safety filter: {e}. Aborted."
             return f"Extracted {len(members)} entries from {archive_path} -> {dest}."
     if fmt == "zip":
         with zipfile.ZipFile(archive, "r") as zf:
