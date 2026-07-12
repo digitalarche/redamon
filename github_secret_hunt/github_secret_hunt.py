@@ -627,8 +627,16 @@ class GitHubSecretHunter:
         print(f"    Repository: {repo}")
         print(f"    Path: {path}")
         if details:
+            # I4: never print the cleartext secret to stdout (docker logs / operator
+            # log stream). Redact the value-bearing fields; keep non-sensitive
+            # metadata. The on-disk JSON artifact keeps the value (tracker decision).
+            _SENSITIVE_KEYS = {"sample", "value", "secret", "match", "matched",
+                               "raw", "token", "entropy_value", "high_entropy_value"}
             for key, value in details.items():
-                print(f"    {key}: {value}")
+                if key.lower() in _SENSITIVE_KEYS:
+                    print(f"    {key}: [REDACTED]")
+                else:
+                    print(f"    {key}: {value}")
         print()
 
         # Save incrementally after each finding
