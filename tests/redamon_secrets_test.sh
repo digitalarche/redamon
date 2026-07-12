@@ -59,16 +59,30 @@ ensure_db_secrets >/dev/null 2>&1
 assert_eq    "POSTGRES_PASSWORD not duplicated" "$(grep -c '^POSTGRES_PASSWORD=' "$TMP/.env")" "1"
 unset -f docker; rm -rf "$TMP"
 
-echo "== ensure_db_secrets: EXISTING volume on default -> warn, no change =="
+# test_ensure_db_secrets_rotates_existing_volume (STRIDE S13)
+echo "== ensure_db_secrets: EXISTING volume on default -> rotate live DB + pin .env =="
 TMP=$(mktemp -d); SCRIPT_DIR="$TMP"; : > "$TMP/.env"
-docker() { return 0; }   # volume inspect succeeds -> existing
+# Stub: `docker volume inspect ...` -> exists (0); `docker exec ...` (the ALTER)
+# -> success (0). So rotation should ALTER then write the new strong value.
+docker() { case "${1:-}" in volume) return 0;; exec) return 0;; *) return 0;; esac; }
+out="$(ensure_db_secrets 2>&1)"
+assert_true  "POSTGRES_PASSWORD rotated + pinned (48 hex)" "grep -qE '^POSTGRES_PASSWORD=[0-9a-f]{48}\$' '$TMP/.env'"
+assert_true  "NEO4J_PASSWORD rotated + pinned (48 hex)"    "grep -qE '^NEO4J_PASSWORD=[0-9a-f]{48}\$' '$TMP/.env'"
+assert_true  "log mentions rotating"        "echo \"\$out\" | grep -qi 'Rotating'"
+assert_true  "log confirms rotated"         "echo \"\$out\" | grep -qi 'Rotated'"
+unset -f docker; rm -rf "$TMP"
+
+# test_ensure_db_secrets_failsafe_on_alter_error (STRIDE S13)
+echo "== ensure_db_secrets: EXISTING volume, ALTER fails -> fail-safe, no .env write =="
+TMP=$(mktemp -d); SCRIPT_DIR="$TMP"; : > "$TMP/.env"
+# Stub: volume exists (0) but the ALTER (docker exec) FAILS (1).
+docker() { case "${1:-}" in volume) return 0;; exec) return 1;; *) return 0;; esac; }
 before=$(md5sum "$TMP/.env" | awk '{print $1}')
 out="$(ensure_db_secrets 2>&1)"
 after=$(md5sum "$TMP/.env" | awk '{print $1}')
-assert_eq    ".env byte-identical (no silent break)" "$before" "$after"
-assert_true  "warns about POSTGRES default" "echo \"\$out\" | grep -q 'POSTGRES_PASSWORD is unset'"
-assert_true  "warns about NEO4J default"    "echo \"\$out\" | grep -q 'NEO4J_PASSWORD is unset'"
-assert_true  "warning mentions rotation"    "echo \"\$out\" | grep -qi 'rotate'"
+assert_eq    ".env unchanged when ALTER fails (no split-brain)" "$before" "$after"
+assert_true  "warns rotation FAILED"        "echo \"\$out\" | grep -qi 'rotation FAILED'"
+assert_true  "warns fail-safe / manual"     "echo \"\$out\" | grep -qi 'fail-safe'"
 unset -f docker; rm -rf "$TMP"
 
 echo "== ensure_db_secrets: operator already pinned -> silent no-op =="
@@ -104,9 +118,11 @@ docker() {  # $3 is the volume name in: docker volume inspect <name>
     [[ "${3:-}" == "envproj_neo4j_data" || "${3:-}" == "envproj_postgres_data" ]] && return 0 || return 1
 }
 out="$(ensure_db_secrets 2>&1)"
-# volume 'exists' under the .env project name -> must WARN, not generate.
-assert_true  "existing-volume detected via .env project name" "echo \"\$out\" | grep -q 'is unset and'"
-assert_false "no password regenerated against live DB"        "grep -q '^POSTGRES_PASSWORD=' '$TMP/.env'"
+# volume 'exists' under the .env project name -> must take the rotation path
+# (not the fresh-generate path). The ALTER stub fails here (exec args don't
+# match the volume names), so fail-safe leaves .env unwritten.
+assert_true  "existing-volume detected via .env project name" "echo \"\$out\" | grep -qi 'Rotating\|on the existing'"
+assert_false "no password blindly generated against live DB"  "grep -q '^POSTGRES_PASSWORD=' '$TMP/.env'"
 unset -f docker; rm -rf "$TMP"
 
 echo "== cmd_update: secrets generated BEFORE container recreate (S6/I19 stay enforced) =="
@@ -122,6 +138,16 @@ rec_line=$(awk -v s="$u_start" -v e="$u_end" 'NR>s && NR<e && /docker compose up
 assert_true "ensure_auth_secrets present in cmd_update" "[[ -n '$sec_line' ]]"
 assert_true "recreate present in cmd_update"            "[[ -n '$rec_line' ]]"
 assert_true "secrets generated before recreate ($sec_line < $rec_line)" "[[ '$sec_line' -lt '$rec_line' ]]"
+
+# test_compose_db_creds_failclosed (STRIDE S13): compose must use the ${VAR:?}
+# fail-closed form (not ${VAR:-default}) for every DB password interpolation, so
+# a stack cannot boot on the published constant.
+echo "== docker-compose DB creds fail closed (no :-default) =="
+COMPOSE="$REPO_ROOT/docker-compose.yml"
+assert_false "no POSTGRES_PASSWORD :-redamon_secret default" "grep -q 'POSTGRES_PASSWORD:-redamon_secret' '$COMPOSE'"
+assert_false "no NEO4J_PASSWORD :-changeme123 default"       "grep -q 'NEO4J_PASSWORD:-changeme123' '$COMPOSE'"
+assert_eq    "POSTGRES_PASSWORD uses :? fail-closed (x2 consumers + db)" "$(grep -c 'POSTGRES_PASSWORD:?' "$COMPOSE")" "3"
+assert_eq    "NEO4J_PASSWORD uses :? fail-closed (db + 4 consumers)"     "$(grep -c 'NEO4J_PASSWORD:?' "$COMPOSE")" "5"
 
 echo
 echo "-----------------------------------------"

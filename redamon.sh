@@ -550,27 +550,58 @@ _data_volume_exists() {
     docker volume inspect "${project}_${suffix}" >/dev/null 2>&1
 }
 
+# Rotate the LIVE Postgres password from <old> to <new> using the old creds.
+# Returns 0 on success, non-zero on failure (wrong old password / DB down), so
+# the caller can decide NOT to write .env (avoiding a split-brain). Isolated in
+# its own function so the shell test harness can stub docker() around it.
+_rotate_postgres_password() {
+    local old="$1" new="$2"
+    local user db
+    user="$(grep -E '^POSTGRES_USER=' "$SCRIPT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+    db="$(grep -E '^POSTGRES_DB=' "$SCRIPT_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-)"
+    user="${user:-redamon}"
+    db="${db:-redamon}"
+    docker exec -e "PGPASSWORD=${old}" redamon-postgres \
+        psql -U "$user" -d "$db" -v ON_ERROR_STOP=1 \
+        -c "ALTER USER \"${user}\" WITH PASSWORD '${new}';" >/dev/null 2>&1
+}
+
+# Rotate the LIVE Neo4j password from <old> to <new>. neo4j:5.26-community only
+# supports the SELF-SERVICE form (ALTER CURRENT USER ... FROM ... TO ...); the
+# admin form (ALTER USER neo4j SET PASSWORD) is Enterprise-only and is rejected
+# on Community. On an already-initialised volume Neo4j ignores NEO4J_AUTH, so
+# this cypher-shell rotation is the only effective path. Returns 0 on success.
+_rotate_neo4j_password() {
+    local old="$1" new="$2"
+    docker exec redamon-neo4j \
+        cypher-shell -u neo4j -p "$old" \
+        "ALTER CURRENT USER SET PASSWORD FROM '${old}' TO '${new}';" >/dev/null 2>&1
+}
+
 # Harden the datastore passwords (STRIDE S13/S1). The passwords are baked into
-# the postgres/neo4j data volumes at FIRST init, so we only auto-generate on a
-# FRESH install (volume absent). On an existing install still on the compose
-# default we must NOT rewrite .env (it would break auth against the already
-# initialised volume) — we warn loudly and point to the rotation procedure.
+# the postgres/neo4j data volumes at FIRST init, so on a FRESH install (volume
+# absent) we auto-generate before the volume is created. On an EXISTING install
+# still on the compose default we now ROTATE in place: ALTER the live DB with the
+# old (default) creds FIRST, and only on success write the new value to .env, so
+# .env and the volume never disagree. If the ALTER fails we fall back to the old
+# warn-only behaviour (fail-safe: never a locked-out DB).
 # Uses url/shell-safe hex so DATABASE_URL and NEO4J_AUTH need no escaping.
 ensure_db_secrets() {
     local env_file="$SCRIPT_DIR/.env"
     touch "$env_file"
 
-    # (var, volume suffix, compose default) triples.
+    # (var, volume suffix, compose default, rotate-fn) tuples.
     local specs=(
-        "POSTGRES_PASSWORD:postgres_data:redamon_secret"
-        "NEO4J_PASSWORD:neo4j_data:changeme123"
+        "POSTGRES_PASSWORD:postgres_data:redamon_secret:_rotate_postgres_password"
+        "NEO4J_PASSWORD:neo4j_data:changeme123:_rotate_neo4j_password"
     )
 
-    local spec var suffix default
+    local spec var suffix default rotate_fn old new
     for spec in "${specs[@]}"; do
-        var="${spec%%:*}"
+        var="$(echo "$spec" | cut -d: -f1)"
         suffix="$(echo "$spec" | cut -d: -f2)"
-        default="${spec##*:}"
+        default="$(echo "$spec" | cut -d: -f3)"
+        rotate_fn="$(echo "$spec" | cut -d: -f4)"
 
         # Operator already pinned it in .env — respect it, do nothing.
         if grep -q "^${var}=" "$env_file" 2>/dev/null; then
@@ -578,11 +609,21 @@ ensure_db_secrets() {
         fi
 
         if _data_volume_exists "$suffix"; then
-            # Existing DB, initialised with the weak compose default. Changing
-            # the password now would lock us out of the running volume.
-            warn "${var} is unset and the ${suffix} volume already exists, so it is running on the DEFAULT password ('${default}')."
-            warn "  Not changing it automatically (would break the existing database)."
-            warn "  To rotate: set a strong ${var} in .env, then update the DB's own password to match (e.g. ALTER USER / neo4j 'dbms.security.changePassword'), or destroy the ${suffix} volume for a clean re-init if the data is disposable."
+            # Existing DB, initialised with the weak compose default. Rotate the
+            # LIVE password using the old default, THEN write the new .env value.
+            old="$default"
+            new="$(openssl rand -hex 24)"
+            info "Rotating ${var} on the existing ${suffix} volume (off the default '${default}')..."
+            if "$rotate_fn" "$old" "$new"; then
+                echo "${var}=${new}" >> "$env_file"
+                info "Rotated ${var} on the live database and pinned it in .env."
+            else
+                # Fail-safe: DO NOT write .env if the ALTER failed (wrong old
+                # password / DB down) — a mismatch would lock out consumers.
+                warn "${var} rotation FAILED (wrong old password, or the database is not up)."
+                warn "  Left .env unchanged (fail-safe; no split-brain)."
+                warn "  To rotate manually: bring the DB up, set a strong ${var} in .env, and ALTER the DB's own password to match, or destroy the ${suffix} volume for a clean re-init if the data is disposable."
+            fi
         else
             # Fresh install — generate before the DB volume is created so it
             # initialises with the strong value across all consumers.
