@@ -699,7 +699,8 @@ docker compose exec postgres psql -U redamon -c "SELECT * FROM \"Project\" LIMIT
 # Bolt URL:    bolt://127.0.0.1:7687
 # Credentials: neo4j / <NEO4J_PASSWORD from .env>
 #   On a fresh install redamon.sh generates a strong NEO4J_PASSWORD into .env;
-#   the changeme123 compose fallback only applies if the var is left unset.
+#   there is no compose fallback anymore - Neo4j refuses to start if the var is
+#   unset (${NEO4J_PASSWORD:?...} fail-closed, STRIDE S13). Run redamon.sh.
 #   Get it with:  grep '^NEO4J_PASSWORD=' .env
 
 # ─── Service Management ─────────────────────────────────────────────────
@@ -914,10 +915,10 @@ These use Docker Compose's `${VAR:-default}` syntax. Override them in `.env` if 
 | Variable | Fallback (if unset) | Description |
 |----------|---------------------|-------------|
 | `POSTGRES_USER` | `redamon` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | `redamon_secret` | PostgreSQL password — **auto-generated on fresh install** |
+| `POSTGRES_PASSWORD` | *(required, no fallback; Postgres refuses to start if unset)* | PostgreSQL password, **auto-generated on fresh install** |
 | `POSTGRES_DB` | `redamon` | PostgreSQL database name |
-| `NEO4J_PASSWORD` | `changeme123` | Neo4j password — **auto-generated on fresh install** |
-| `MCP_AUTH_TOKEN` | *(empty ⇒ MCP servers fail open)* | Bearer token the agent presents to the Kali MCP servers — **auto-generated on fresh install** |
+| `NEO4J_PASSWORD` | *(required, no fallback; Neo4j refuses to start if unset)* | Neo4j password, **auto-generated on fresh install** |
+| `MCP_AUTH_TOKEN` | *(required; empty ⇒ MCP servers fail closed / reject)* | Bearer token the agent presents to the Kali MCP servers, **auto-generated on fresh install** |
 | `POSTGRES_PORT` | `5432` | Host port for PostgreSQL (bound to `127.0.0.1`) |
 | `NEO4J_HTTP_PORT` | `7474` | Host port for Neo4j Browser UI (bound to `127.0.0.1`) |
 | `NEO4J_BOLT_PORT` | `7687` | Host port for Neo4j Bolt protocol (bound to `127.0.0.1`) |

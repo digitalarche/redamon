@@ -306,7 +306,13 @@ networks:
 > containers it spawns do **not** receive the raw Docker socket — they mount a
 > filtering broker socket that only permits creating the known tool containers
 > (allowlisted images), so a compromised recon container cannot mount the host
-> filesystem, run privileged, or escape to the host. The broker also enforces the
+> filesystem, run privileged, or escape to the host. As of wave 2 (STRIDE E1) the
+> broker also gates **operate-on-existing** verbs (`exec`/`attach`/`start`/`kill`/
+> `archive`/`commit`/etc.) by an owner label (`redamon.broker-owned`): a request is
+> denied unless the target container carries the marker the broker stamps on every
+> container it creates, and container listing is scoped to owned containers only, so
+> a compromised worker can no longer `exec` into the orchestrator/broker (the
+> raw-socket holders) or enumerate infra. The broker also enforces the
 > mount **mode** (STRIDE T1/T2): a host path may be bound read-write only if it is
 > under `ALLOWED_RW_PREFIXES` (default `/tmp/redamon`); source-tree binds must be
 > `:ro`, so a compromised worker cannot overwrite `recon/main.py` or an Agent

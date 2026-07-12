@@ -1100,10 +1100,11 @@ from knowledge_base.faiss_indexer import FAISSIndexer
 from knowledge_base.neo4j_loader import Neo4jLoader
 from knowledge_base.embedder import Embedder
 from neo4j import GraphDatabase
+import os
 
 embedder = Embedder('intfloat/e5-large-v2')
 faiss = FAISSIndexer('/app/knowledge_base/data', dimensions=1024)
-driver = GraphDatabase.driver('bolt://neo4j:7687', auth=('neo4j', 'changeme123'))
+driver = GraphDatabase.driver('bolt://neo4j:7687', auth=('neo4j', os.environ['NEO4J_PASSWORD']))
 kb = PentestKnowledgeBase(faiss, Neo4jLoader(driver), embedder)
 kb.load()
 

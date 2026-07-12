@@ -72,7 +72,7 @@ These variables are set in `docker-compose.yml` and passed to the container:
 |----------|-------|-------------|
 | `MCP_TRANSPORT` | `sse` | Transport mode: `stdio` (direct) or `sse` (network) |
 | `MCP_HOST` | `0.0.0.0` | Bind address **inside the container** (so the agent can reach the servers over the internal `redamon` bridge). The *host* port publish is loopback-only — see the security note below. |
-| `MCP_AUTH_TOKEN` | *(generated)* | Bearer token required on every MCP SSE request. Auto-generated into `.env` by `redamon.sh`; the agent sends it, the servers validate it. Empty/unset ⇒ servers **fail open** with a warning (dev only). |
+| `MCP_AUTH_TOKEN` | *(generated)* | Bearer token required on every MCP SSE request. Auto-generated into `.env` by `redamon.sh`; the agent sends it, the servers validate it. Empty/unset ⇒ servers **fail closed** (reject with 401/1008); a wrapper-build error no longer falls back to unauthenticated serving. |
 | `NETWORK_RECON_PORT` | `8000` | HTTP client + port scanner server |
 | `NUCLEI_PORT` | `8002` | Vulnerability scanner server |
 | `METASPLOIT_PORT` | `8003` | Exploitation framework server |
@@ -474,9 +474,11 @@ default:
 - **Bearer-token auth.** Every MCP SSE request must carry
   `Authorization: Bearer $MCP_AUTH_TOKEN`. `redamon.sh` generates the token into
   `.env`; the agent sends it automatically. If the token is unset (e.g. a manual
-  `docker compose up` without running `redamon.sh`), the servers **fail open**
-  with a startup warning — the loopback bind is still the active control in that
-  case. To require auth in that scenario, set `MCP_AUTH_TOKEN` in `.env`.
+  `docker compose up` without running `redamon.sh`), the servers **fail closed**
+  and reject every request (a token-less request gets 401/1008), and a
+  wrapper-build error no longer degrades to serving unauthenticated; the
+  loopback bind is defense-in-depth on top of the mandatory bearer. To run the
+  stack at all, set `MCP_AUTH_TOKEN` in `.env` (or just run `redamon.sh`).
 
 This closes the unauthenticated-RCE surface tracked as STRIDE **S10 / E1 / I9**
 in `internal/security/README.TM.STRIDE.md`.

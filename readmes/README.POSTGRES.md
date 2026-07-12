@@ -133,7 +133,7 @@ services:
     container_name: redamon-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-redamon}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-redamon_secret}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set - run redamon.sh (STRIDE S13)}
       POSTGRES_DB: ${POSTGRES_DB:-redamon}
     ports:
       - "5432:5432"

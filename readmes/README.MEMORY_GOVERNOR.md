@@ -232,8 +232,11 @@ Notes:
 
 Per-scan envelopes come from `RECON_JOB_ENVELOPE_MEM` (env override) or the measured
 `scan_job_envelope_bytes` (else a conservative fallback). `RECON_MAX_CONCURRENT_GLOBAL` is
-an optional secondary hard count cap across *all* projects (`0` blocks all new scans; unset
-= bytes-ledger only).
+a secondary hard count cap across *all* projects, now with an **enforced default of `20`**
+(STRIDE D3; `0` blocks all new scans, unset resolves to the default rather than "no cap").
+A companion per-user cap `RECON_MAX_CONCURRENT_PER_USER` (default `10`) prevents one operator's
+per-project limits from multiplying across many projects; both are checked at admission before
+the bytes-ledger.
 
 ---
 
@@ -454,7 +457,8 @@ All are optional; defaults live in code (empty/unset → default). Documented in
 | `OS_HEADROOM_MEM` | `2g` | RAM reserved for the OS/kernel, never handed to work. |
 | `SERVICE_BASELINE_MEM` | measured, else `6g` | total RAM the always-on services use; subtracted from the scan pool and used by the startup gate. |
 | `RECON_JOB_ENVELOPE_MEM` | measured, else `4g` | expected peak RAM of one recon job (container + siblings), the unit the pool is divided into. `0`/invalid is ignored. |
-| `RECON_MAX_CONCURRENT_GLOBAL` | unset (bytes-ledger only) | optional hard count cap on globally-concurrent scans across all projects. `0` blocks all new scans. |
+| `RECON_MAX_CONCURRENT_GLOBAL` | `20` (STRIDE D3) | hard count cap on globally-concurrent scans across all projects. `0` blocks all new scans; unset resolves to the default, not "no cap". |
+| `RECON_MAX_CONCURRENT_PER_USER` | `10` (STRIDE D3) | hard count cap on concurrent scans per user, so per-project limits cannot multiply across many projects. |
 
 ### Agent caps
 

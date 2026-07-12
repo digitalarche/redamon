@@ -98,7 +98,7 @@ image ~7-10 GB, plus feeds/models/DB data/build cache).
 | `SSH_ALLOW_CIDRS` | Comma list for ufw :22. Blank -> falls back to `OPERATOR_ALLOW_CIDRS`. |
 | `GATE_MODE` | `ip_allowlist` (recommended) \| `basic_auth` \| `none`. |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | Required for `basic_auth`. |
-| `WS_REQUIRE_SESSION` | Default `true`. nginx `auth_request` requires a valid webapp session cookie before ANY `/ws/*` upgrade. Keep it on: three of the four agent WS paths are unauthenticated (one is a root PTY) and `/ws/agent`'s ticket check fails open, so this is the real authentication layer in front of them. |
+| `WS_REQUIRE_SESSION` | Default `true`. nginx `auth_request` requires a valid webapp session cookie before ANY `/ws/*` upgrade. Keep it on as defense-in-depth: all four agent WS paths now enforce a signed ws-ticket + a server-side same-origin check at the app layer (fail-closed when `AGENT_WS_TICKET_SECRET` is unset), and this cookie gate sits in front of that as a second layer. |
 | `CSP_ENFORCE` | Default `false` (Content-Security-Policy-Report-Only). Set `true` to enforce the CSP after confirming the WebGL graph and xterm terminal still render. |
 | `ENABLE_UFW` | Host firewall (default true). |
 | `ENABLE_SSH_HARDENING` | Key-only + no-root login. Skips disabling password login if you deployed over a password (so you don't lock yourself out). |
@@ -210,16 +210,18 @@ Connection fields can be overridden positionally, e.g.
 RedAmon's threat model assumes a local-only deployment with no anonymous internet attacker.
 Putting it on a public IP invalidates that, so the deploy closes the gap:
 
-- The agent REST API is almost entirely **unauthenticated** (`/graph/exec`, `/emergency-stop-all`,
-  the whole `/workspace/*` family, `/sessions/*`, `/files`, FastAPI `/docs` + `/openapi.json`),
-  and three of the four WS paths are unauthenticated - `/ws/kali-terminal` is an anonymous
-  **root PTY**, and the two cypherfix sockets clone repos / edit code. `/ws/agent`'s ticket
-  check fails **open** if its secret is unset. So the deploy treats the agent as fully
+- Parts of the agent REST API remain **unauthenticated** (the whole `/workspace/*` family,
+  `/sessions/*`, `/files`, FastAPI `/docs` + `/openapi.json`); `/graph/exec` and
+  `/emergency-stop-all` now require `require_internal_auth` (wave 2). All four WS paths now
+  enforce a signed ws-ticket + a server-side same-origin check and **fail closed** when
+  `AGENT_WS_TICKET_SECRET` is unset - including `/ws/kali-terminal` (the root PTY) and the two
+  cypherfix sockets that clone repos / edit code. The deploy still treats the agent as fully
   untrusted from the edge:
   - nginx proxies **only** the four `/ws/*` paths to the agent - never any agent REST route.
   - **`auth_request` (WS_REQUIRE_SESSION=true)** makes nginx validate the webapp session
-    cookie against `/api/auth/me` before allowing any WS upgrade, so those unauthenticated
-    agent sockets require a logged-in user - not just a network position.
+    cookie against `/api/auth/me` before allowing any WS upgrade, so reaching those
+    agent sockets requires a logged-in user - not just a network position - on top of the
+    app-layer ws-ticket.
   - the operator **IP allowlist / basic-auth gate** sits in front of everything.
 - The webapp trusts `X-Internal-Key` as a service-to-service **auth bypass** and injects
   `X-User-Id` / `X-User-Role` downstream after auth. nginx **strips these inbound headers** on
@@ -234,8 +236,8 @@ Putting it on a public IP invalidates that, so the deploy closes the gap:
 - Every secret must be strong: the deploy runs a **secrets gate** that fails the build on any
   unset/default/short secret (`changeme`, `redamon_secret`, ...). redamon.sh generates them;
   the deploy only verifies.
-- `ip_allowlist` (default `GATE_MODE`) is strongly recommended given the unauthenticated
-  agent WS + root PTY - even though the app has its own login.
+- `ip_allowlist` (default `GATE_MODE`) is strongly recommended given the powerful
+  agent WS surface + root PTY - defense-in-depth on top of the app-layer ws-ticket and login.
 - **Reverse shell (4444)** is bound to loopback by the prod overlay and closed at the
   firewall. To catch a *direct* reverse shell during an engagement, set
   `REVSHELL_TARGET_CIDRS` to your RoE target scope and run `./deploy.sh revshell-open`; run
