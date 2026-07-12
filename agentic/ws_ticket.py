@@ -13,10 +13,13 @@ Ticket format: a standard compact HS256 JWS produced by the webapp via `jose`
 Verification is stdlib-only (hmac/hashlib/base64) so the agent image needs no
 new dependency.
 
-Fail-open convention (mirrors the MCP `MCP_AUTH_TOKEN` design, S10): when
-`AGENT_WS_TICKET_SECRET` is unset the agent logs a one-time warning and accepts
-the init without a ticket, so dev / pre-generation stacks keep working. Real
-deployments get the secret from `redamon.sh ensure_auth_secrets`.
+Fail-CLOSED (STRIDE S2/S3/S4): when `AGENT_WS_TICKET_SECRET` is unset, the
+`/ws/agent`, `/ws/kali-terminal`, and both `/ws/cypherfix-*` handlers REJECT the
+connection (close 1008) instead of trusting a self-asserted identity. A stack
+brought up WITHOUT `redamon.sh` (which generates the secret via
+`ensure_auth_secrets`) therefore has non-functional WebSockets by design; run
+`redamon.sh` or set the secret. `verify_ws_ticket` also fails closed when the
+secret is configured but the ticket is missing/invalid/expired.
 """
 
 import base64
@@ -30,24 +33,11 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_warned_failopen = False
-
 
 def ticket_secret() -> str:
-    """Return the configured signing secret, or '' when unset (dev fail-open)."""
+    """Return the configured signing secret, or '' when unset. An empty value
+    makes every WS handler fail CLOSED (S2/S3/S4), not fail-open."""
     return os.environ.get("AGENT_WS_TICKET_SECRET", "") or ""
-
-
-def warn_ticket_failopen_once() -> None:
-    """Emit a single warning when running without a ticket secret."""
-    global _warned_failopen
-    if not _warned_failopen:
-        logger.warning(
-            "AGENT_WS_TICKET_SECRET is not set - /ws/agent init is accepted "
-            "without ticket verification (fail-open; dev only). Generate it via "
-            "redamon.sh to enforce WebSocket authentication (S6)."
-        )
-        _warned_failopen = True
 
 
 def check_ws_origin(origin: Optional[str], host: Optional[str], extra_allowed=None) -> bool:

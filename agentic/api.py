@@ -27,7 +27,7 @@ from fastapi.responses import Response, JSONResponse
 from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import BaseModel
 
-from llm_guard import require_internal_auth
+from llm_guard import require_internal_auth, require_internal_auth_only
 from logging_config import setup_logging
 from orchestrator import AgentOrchestrator
 from orchestrator_helpers import normalize_content
@@ -1076,7 +1076,7 @@ async def llm_takeover_classify(body: TakeoverClassifyRequest):
     }
 
 
-@app.post("/emergency-stop-all", tags=["System"], dependencies=[Depends(require_internal_auth)])
+@app.post("/emergency-stop-all", tags=["System"], dependencies=[Depends(require_internal_auth_only)])
 async def emergency_stop_all():
     """Emergency stop: cancel every running agent task immediately."""
     if not ws_manager:
@@ -2778,7 +2778,7 @@ class GraphExecRequest(BaseModel):
     cypher: Optional[str] = None  # only for op="cypher"
 
 
-@app.post("/graph/exec", tags=["Graph"], dependencies=[Depends(require_internal_auth)])
+@app.post("/graph/exec", tags=["Graph"], dependencies=[Depends(require_internal_auth_only)])
 async def graph_exec(body: GraphExecRequest):
     from graph_db.tenant_filter import find_disallowed_write_operation, inject_tenant_filter
 

@@ -75,10 +75,16 @@ export const KaliTerminal = memo(function KaliTerminal({ userId, projectId }: Ka
   const sessionIdRef = useRef<string>(
     typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `kali-${Date.now()}`
   )
+  // S3: connect() awaits a ws-ticket fetch; this synchronous sentinel closes the
+  // double-fire window the await opened (a concurrent connect would otherwise open
+  // an orphan socket).
+  const connectingRef = useRef(false)
 
   const connect = useCallback(async () => {
     if (!termRef.current || !mountedRef.current) return
+    if (connectingRef.current) return
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return
+    connectingRef.current = true
 
     setStatus('connecting')
 
@@ -175,21 +181,24 @@ export const KaliTerminal = memo(function KaliTerminal({ userId, projectId }: Ka
     // dialing. Without a valid ticket the agent proxy now closes the socket.
     const pid = tenantRef.current.projectId
     if (!pid) {
+      connectingRef.current = false
       setStatus('error')
-      terminal.writeln('\x1b[1;31m✗ No project selected — open a project to use the terminal\x1b[0m')
+      terminal.writeln('\x1b[1;31m✗ No project selected - open a project to use the terminal\x1b[0m')
       return
     }
     const ticket = await fetchKaliTicket(String(pid), sessionIdRef.current)
     if (!ticket) {
+      connectingRef.current = false
       setStatus('error')
       terminal.writeln('\x1b[1;31m✗ Terminal authentication failed (could not obtain a ticket)\x1b[0m')
       return
     }
-    if (!mountedRef.current) return
+    if (!mountedRef.current) { connectingRef.current = false; return }
 
     const url = getWsUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
+    connectingRef.current = false
 
     ws.binaryType = 'arraybuffer'
 

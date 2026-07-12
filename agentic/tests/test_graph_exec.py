@@ -103,7 +103,9 @@ def main():
     check("apoc.atomic.* rejected 403", resp.status_code == 403)
 
     print("=== S8/I8/D7: /graph/exec and /emergency-stop-all require internal auth ===")
-    from llm_guard import require_internal_auth
+    # Both use the AUTH-ONLY dependency (no LLM rate-limit / daily cap) — graph
+    # reads are cheap high-frequency, not billed LLM calls (regression guard).
+    from llm_guard import require_internal_auth, require_internal_auth_only
 
     def _route_deps(path):
         for r in api.app.routes:
@@ -113,8 +115,30 @@ def main():
 
     ge_deps = _route_deps("/graph/exec")
     es_deps = _route_deps("/emergency-stop-all")
-    check("/graph/exec depends on require_internal_auth", ge_deps is not None and require_internal_auth in ge_deps)
-    check("/emergency-stop-all depends on require_internal_auth", es_deps is not None and require_internal_auth in es_deps)
+    check("/graph/exec requires internal auth (auth-only)", ge_deps is not None and require_internal_auth_only in ge_deps)
+    check("/emergency-stop-all requires internal auth (auth-only)", es_deps is not None and require_internal_auth_only in es_deps)
+    check("/graph/exec is NOT LLM-rate-limited (no require_internal_auth)", require_internal_auth not in (ge_deps or []))
+
+    # Regression: auth-only dependency authenticates but never throttles, even
+    # across a bulk graph walk (>60 calls that would trip the 60-token bucket).
+    import asyncio as _asyncio
+    from starlette.requests import Request as _Req
+    from llm_guard import _key_ok as _kok  # noqa
+    os.environ["SCANNER_API_KEY"] = "scoped-xyz"
+
+    async def _call_auth_only(hdr):
+        scope = {"type": "http", "headers": [(b"x-internal-key", hdr.encode())] if hdr else [], "client": ("1.2.3.4", 9)}
+        req = _Req(scope)
+        try:
+            await require_internal_auth_only(req)
+            return True
+        except Exception:
+            return False
+
+    ok_count = sum(1 for _ in range(200) if run(_call_auth_only("scoped-xyz")))
+    check("auth-only allows 200 consecutive authed calls (no rate limit)", ok_count == 200)
+    check("auth-only rejects a bad key (401)", run(_call_auth_only("wrong")) is False)
+    os.environ.pop("SCANNER_API_KEY", None)
 
     print()
     print(f"RESULT: PASS={PASS} FAIL={FAIL}")

@@ -71,6 +71,11 @@ export function useCypherFixTriageWS({
   const isAuthenticatedRef = useRef(false)
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const pendingStartRef = useRef(false)
+  // S4: connect() became async (it awaits a ws-ticket fetch) which opened a
+  // double-fire window before wsRef is set. This synchronous sentinel prevents a
+  // second concurrent connect() from opening an orphan socket whose later onclose
+  // would null the live socket's ref and kill its keepalive.
+  const connectingRef = useRef(false)
 
   const getWebSocketUrl = useCallback((ticket?: string) => {
     let base: string
@@ -97,8 +102,9 @@ export function useCypherFixTriageWS({
   }, [])
 
   const connect = useCallback(async () => {
-    if (wsRef.current) return
+    if (wsRef.current || connectingRef.current) return
     if (!enabled || !userId || !projectId) return
+    connectingRef.current = true
 
     setStatus('connecting')
     setError(null)
@@ -118,6 +124,7 @@ export function useCypherFixTriageWS({
       ticket = null
     }
     if (!ticket) {
+      connectingRef.current = false
       wsRef.current = null
       setStatus('error')
       setError('Triage authentication failed (could not obtain a ticket)')
@@ -127,6 +134,7 @@ export function useCypherFixTriageWS({
     const url = getWebSocketUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
+    connectingRef.current = false
 
     ws.onopen = () => {
       sendMessage(CypherFixTriageMessageType.INIT, {

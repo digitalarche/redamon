@@ -183,7 +183,9 @@ async def _extract_user_id(request: Request) -> str:
 # The dependency
 # ---------------------------------------------------------------------------
 async def require_internal_auth(request: Request) -> None:
-    """FastAPI dependency: auth → rate-limit → spend-cap. Raises 401 / 429."""
+    """FastAPI dependency: auth → rate-limit → spend-cap. Raises 401 / 429.
+
+    Use for BILLED LLM endpoints (the rate-limit + daily cap protect LLM spend)."""
     provided = request.headers.get("x-internal-key", "")
     if not _key_ok(provided):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -195,3 +197,16 @@ async def require_internal_auth(request: Request) -> None:
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     if not _daily_cap.allow(user_id):
         raise HTTPException(status_code=429, detail="Daily LLM call cap exceeded")
+
+
+async def require_internal_auth_only(request: Request) -> None:
+    """FastAPI dependency: AUTH ONLY (no LLM rate-limit / daily spend cap).
+
+    For NON-LLM internal endpoints that authenticate the same way but are cheap
+    high-frequency calls (e.g. /graph/exec graph reads) or rare control actions
+    (/emergency-stop-all). Applying the LLM token bucket / 5000-per-day cap to
+    these would throttle a legitimate bulk graph walk and let graph reads exhaust
+    the LLM budget, which they must not (STRIDE S8 non-breaking requirement)."""
+    provided = request.headers.get("x-internal-key", "")
+    if not _key_ok(provided):
+        raise HTTPException(status_code=401, detail="Unauthorized")

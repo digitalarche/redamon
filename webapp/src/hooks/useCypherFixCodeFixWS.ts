@@ -81,6 +81,8 @@ export function useCypherFixCodeFixWS({
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const pendingRemediationRef = useRef<string | null>(null)
   const logIdRef = useRef(0)
+  // S4: guard the async connect() double-fire window (see triage hook).
+  const connectingRef = useRef(false)
 
   // Distributive Omit so TS preserves the discriminated union variants
   type LogInput = ActivityEntry extends infer T ? T extends ActivityEntry ? Omit<T, 'id' | 'ts'> : never : never
@@ -114,8 +116,9 @@ export function useCypherFixCodeFixWS({
   }, [])
 
   const connect = useCallback(async () => {
-    if (wsRef.current) return
+    if (wsRef.current || connectingRef.current) return
     if (!enabled || !userId || !projectId) return
+    connectingRef.current = true
 
     setStatus('connecting')
     setError(null)
@@ -134,6 +137,7 @@ export function useCypherFixCodeFixWS({
       ticket = null
     }
     if (!ticket) {
+      connectingRef.current = false
       wsRef.current = null
       setStatus('error')
       setError('CodeFix authentication failed (could not obtain a ticket)')
@@ -143,6 +147,7 @@ export function useCypherFixCodeFixWS({
     const url = getWebSocketUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
+    connectingRef.current = false
 
     ws.onopen = () => {
       sendMessage(CypherFixCodeFixMessageType.INIT, {
