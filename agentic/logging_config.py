@@ -4,10 +4,59 @@ RedAmon Agent Logging Configuration
 Configures logging with file rotation, console output, and proper formatting.
 """
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from project_settings import get_setting
+
+# =============================================================================
+# I5 — secret redaction filter
+# =============================================================================
+# Scrub known token shapes from EVERY log record before any handler writes, so a
+# future exception (SDK error, clone URL, header dump) carrying a secret cannot
+# land in agent.log / codefix.log / triage.log in cleartext.
+_REDACT_PATTERNS = [
+    re.compile(r"gh[posru]_[A-Za-z0-9]{20,}"),                    # GitHub PAT / OAuth
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),                  # fine-grained PAT
+    re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),                        # OpenAI-style keys
+    re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"),                 # Slack tokens
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"),             # Bearer <token>
+    re.compile(r"(?i)(authorization|api[-_]?key|x-api-key|token)\s*[:=]\s*[^\s,;]{6,}"),  # header/kv value
+    re.compile(r"https?://[^/\s:@]+:[^/\s@]+@"),                  # user:pass@ in URLs (x-access-token:...@)
+    re.compile(r"AKIA[0-9A-Z]{16}"),                             # AWS access key id
+]
+_REDACTED = "[REDACTED]"
+
+
+def _redact_text(text: str) -> str:
+    for pat in _REDACT_PATTERNS:
+        text = pat.sub(_REDACTED, text)
+    return text
+
+
+class RedactingFilter(logging.Filter):
+    """Rewrite token-shaped substrings in the formatted message + args to
+    ``[REDACTED]``. Attached to every handler this module creates."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = _redact_text(record.msg)
+            if record.args:
+                if isinstance(record.args, dict):
+                    record.args = {k: _redact_text(v) if isinstance(v, str) else v
+                                   for k, v in record.args.items()}
+                else:
+                    record.args = tuple(_redact_text(a) if isinstance(a, str) else a
+                                        for a in record.args)
+        except Exception:
+            # Redaction must never break logging.
+            pass
+        return True
+
+
+_REDACTING_FILTER = RedactingFilter()
 
 # =============================================================================
 # LOGGING SETTINGS
@@ -71,6 +120,7 @@ def setup_logging(
         console_handler.setLevel(log_level)
         console_formatter = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
         console_handler.setFormatter(console_formatter)
+        console_handler.addFilter(_REDACTING_FILTER)  # I5
         root_logger.addHandler(console_handler)
 
     # File handler with rotation
@@ -85,6 +135,7 @@ def setup_logging(
         file_handler.setLevel(FILE_LOG_LEVEL)
         file_formatter = logging.Formatter(FILE_LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
         file_handler.setFormatter(file_formatter)
+        file_handler.addFilter(_REDACTING_FILTER)  # I5
         root_logger.addHandler(file_handler)
 
     # Module-specific file handlers (separate log files for CypherFix agents)
@@ -101,6 +152,7 @@ def setup_logging(
             module_handler.setFormatter(
                 logging.Formatter(FILE_LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
             )
+            module_handler.addFilter(_REDACTING_FILTER)  # I5
             module_logger = logging.getLogger(module_name)
             module_logger.handlers.clear()  # Prevent duplicates on re-init
             module_logger.addHandler(module_handler)

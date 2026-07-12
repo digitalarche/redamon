@@ -1946,9 +1946,12 @@ async def test_llm_provider(body: LlmProviderTestRequest):
         return {"success": True, "response_text": text}
 
     except Exception as e:
+        # I5: log the detail server-side ONLY. The raw SDK/httpx error string can
+        # embed the Authorization header / API key; returning it to the settings
+        # UI would leak key material. Respond with a generic message instead.
         logger.error(f"LLM provider test failed: {e}")
         return JSONResponse(
-            content={"success": False, "error": str(e)},
+            content={"success": False, "error": "Provider test failed. Check the key, model, and base URL; see server logs for detail."},
             status_code=400,
         )
 
