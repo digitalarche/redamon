@@ -72,13 +72,23 @@ export function useCypherFixTriageWS({
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const pendingStartRef = useRef(false)
 
-  const getWebSocketUrl = useCallback(() => {
-    if (typeof window !== 'undefined') {
+  const getWebSocketUrl = useCallback((ticket?: string) => {
+    let base: string
+    // Same-origin single-origin deploy: reuse the agent WS origin and swap the
+    // path (folds the former deploy-time cypherfix-ws-origin.patch into the base
+    // hook so this hook never targets a public :8090).
+    if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
+      base = process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/cypherfix-triage')
+    } else if (typeof window !== 'undefined') {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.hostname
-      return `${protocol}//${host}:8090/ws/cypherfix-triage`
+      base = `${protocol}//${host}:8090/ws/cypherfix-triage`
+    } else {
+      base = 'ws://localhost:8090/ws/cypherfix-triage'
     }
-    return 'ws://localhost:8090/ws/cypherfix-triage'
+    // STRIDE S4: the agent handler requires a ws-ticket (query param).
+    if (ticket) base += (base.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticket)
+    return base
   }, [])
 
   const sendMessage = useCallback((type: string, payload: Record<string, unknown> = {}) => {
@@ -86,14 +96,35 @@ export function useCypherFixTriageWS({
     wsRef.current.send(JSON.stringify({ type, payload }))
   }, [])
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (wsRef.current) return
     if (!enabled || !userId || !projectId) return
 
     setStatus('connecting')
     setError(null)
 
-    const url = getWebSocketUrl()
+    // STRIDE S4: mint a ws-ticket (effective user + project) before dialing;
+    // the agent handler now fails closed without one.
+    const sessionId = `triage-${Date.now()}`
+    let ticket: string | null = null
+    try {
+      const resp = await fetch('/api/agent/ws-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, sessionId }),
+      })
+      if (resp.ok) ticket = (await resp.json())?.ticket ?? null
+    } catch {
+      ticket = null
+    }
+    if (!ticket) {
+      wsRef.current = null
+      setStatus('error')
+      setError('Triage authentication failed (could not obtain a ticket)')
+      return
+    }
+
+    const url = getWebSocketUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
 
@@ -101,7 +132,7 @@ export function useCypherFixTriageWS({
       sendMessage(CypherFixTriageMessageType.INIT, {
         user_id: userId,
         project_id: projectId,
-        session_id: `triage-${Date.now()}`,
+        session_id: sessionId,
       })
     }
 

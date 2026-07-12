@@ -91,13 +91,21 @@ export function useCypherFixCodeFixWS({
     return id
   }, [])
 
-  const getWebSocketUrl = useCallback(() => {
-    if (typeof window !== 'undefined') {
+  const getWebSocketUrl = useCallback((ticket?: string) => {
+    let base: string
+    // Same-origin single-origin deploy (folds cypherfix-ws-origin.patch).
+    if (process.env.NEXT_PUBLIC_AGENT_WS_URL) {
+      base = process.env.NEXT_PUBLIC_AGENT_WS_URL.replace(/\/ws\/agent$/, '/ws/cypherfix-codefix')
+    } else if (typeof window !== 'undefined') {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.hostname
-      return `${protocol}//${host}:8090/ws/cypherfix-codefix`
+      base = `${protocol}//${host}:8090/ws/cypherfix-codefix`
+    } else {
+      base = 'ws://localhost:8090/ws/cypherfix-codefix'
     }
-    return 'ws://localhost:8090/ws/cypherfix-codefix'
+    // STRIDE S4: the agent handler requires a ws-ticket (query param).
+    if (ticket) base += (base.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticket)
+    return base
   }, [])
 
   const sendMessage = useCallback((type: string, payload: Record<string, unknown> = {}) => {
@@ -105,14 +113,34 @@ export function useCypherFixCodeFixWS({
     wsRef.current.send(JSON.stringify({ type, payload }))
   }, [])
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (wsRef.current) return
     if (!enabled || !userId || !projectId) return
 
     setStatus('connecting')
     setError(null)
 
-    const url = getWebSocketUrl()
+    // STRIDE S4: mint a ws-ticket before dialing; the agent fails closed now.
+    const sessionId = `codefix-${Date.now()}`
+    let ticket: string | null = null
+    try {
+      const resp = await fetch('/api/agent/ws-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, sessionId }),
+      })
+      if (resp.ok) ticket = (await resp.json())?.ticket ?? null
+    } catch {
+      ticket = null
+    }
+    if (!ticket) {
+      wsRef.current = null
+      setStatus('error')
+      setError('CodeFix authentication failed (could not obtain a ticket)')
+      return
+    }
+
+    const url = getWebSocketUrl(ticket)
     const ws = new WebSocket(url)
     wsRef.current = ws
 
@@ -120,7 +148,7 @@ export function useCypherFixCodeFixWS({
       sendMessage(CypherFixCodeFixMessageType.INIT, {
         user_id: userId,
         project_id: projectId,
-        session_id: `codefix-${Date.now()}`,
+        session_id: sessionId,
       })
     }
 

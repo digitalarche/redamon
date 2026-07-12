@@ -68,7 +68,29 @@ class CodeFixStreamingCallback:
 
 
 async def handle_codefix_websocket(websocket: WebSocket):
-    """Main WebSocket handler for CodeFix agent connections."""
+    """Main WebSocket handler for CodeFix agent connections.
+
+    STRIDE S4: same-origin + fail-closed ws-ticket gate BEFORE accept(). The
+    CodeFix agent can clone/edit repos and open PRs, so an unauthenticated /
+    cross-origin drive-by here is high impact. Identity is bound from the verified
+    ticket claims, never the self-asserted init frame.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+    _agentic = str(_Path(__file__).resolve().parents[1])
+    if _agentic not in _sys.path:
+        _sys.path.insert(0, _agentic)
+    from ws_ticket import authorize_ws, cors_allowlist
+
+    _origin = websocket.headers.get("origin")
+    _host = websocket.headers.get("host")
+    _ticket = websocket.query_params.get("ticket")
+    _ok, _claims, _reason = authorize_ws(_origin, _host, _ticket, cors_allowlist())
+    if not _ok:
+        logger.warning("Rejected /ws/cypherfix-codefix: %s (origin=%r)", _reason, _origin)
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     callback = CodeFixStreamingCallback(websocket)
 
@@ -86,11 +108,11 @@ async def handle_codefix_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
 
             elif msg_type == "init":
-                payload = msg.get("payload", msg)
+                # Identity from the VERIFIED ticket claims (S4), not the frame.
                 state = CodeFixState()
-                state.user_id = payload.get("user_id", "")
-                state.project_id = payload.get("project_id", "")
-                state.session_id = payload.get("session_id", str(uuid.uuid4()))
+                state.user_id = str(_claims["sub"])
+                state.project_id = str(_claims["pid"])
+                state.session_id = str(_claims["sid"])
                 state.streaming_callback = callback
                 await websocket.send_json({
                     "type": "connected", "session_id": state.session_id,

@@ -98,5 +98,29 @@ class AuthorizeGate(unittest.TestCase):
         self.assertIn("not configured", reason)
 
 
+class CypherfixHandlerWiring(unittest.TestCase):
+    """S4: both cypherfix handlers must gate (authorize_ws) BEFORE accept() and
+    bind identity from claims, not the self-asserted init frame."""
+
+    def _read(self, rel):
+        return (Path(_AGENTIC_DIR) / rel).read_text()
+
+    def test_triage_gates_before_accept(self):
+        src = self._read("cypherfix_triage/websocket_handler.py")
+        i_auth = src.index("authorize_ws(")
+        i_accept = src.index("await websocket.accept()")
+        self.assertLess(i_auth, i_accept, "authorize_ws must run before accept()")
+        self.assertIn('str(_claims["sub"])', src)
+        self.assertNotIn('payload.get("user_id"', src)
+
+    def test_codefix_gates_before_accept(self):
+        src = self._read("cypherfix_codefix/websocket_handler.py")
+        i_auth = src.index("authorize_ws(")
+        i_accept = src.index("await websocket.accept()")
+        self.assertLess(i_auth, i_accept, "authorize_ws must run before accept()")
+        self.assertIn('str(_claims["sub"])', src)
+        self.assertNotIn('payload.get("user_id"', src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

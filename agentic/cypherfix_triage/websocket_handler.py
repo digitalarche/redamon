@@ -64,7 +64,27 @@ class TriageStreamingCallback:
 
 
 async def handle_triage_websocket(websocket: WebSocket):
-    """Main WebSocket handler for triage agent connections."""
+    """Main WebSocket handler for triage agent connections.
+
+    STRIDE S4: same-origin + fail-closed ws-ticket gate BEFORE accept(). Identity
+    is bound from the verified ticket claims, never the self-asserted init frame.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+    _agentic = str(_Path(__file__).resolve().parents[1])
+    if _agentic not in _sys.path:
+        _sys.path.insert(0, _agentic)
+    from ws_ticket import authorize_ws, cors_allowlist
+
+    _origin = websocket.headers.get("origin")
+    _host = websocket.headers.get("host")
+    _ticket = websocket.query_params.get("ticket")
+    _ok, _claims, _reason = authorize_ws(_origin, _host, _ticket, cors_allowlist())
+    if not _ok:
+        logger.warning("Rejected /ws/cypherfix-triage: %s (origin=%r)", _reason, _origin)
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     callback = TriageStreamingCallback(websocket)
 
@@ -82,11 +102,12 @@ async def handle_triage_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "pong"})
 
             elif msg_type == "init":
-                payload = msg.get("payload", msg)
+                # Identity is bound from the VERIFIED ticket claims (S4), not the
+                # self-asserted init frame.
                 state: TriageState = {
-                    "user_id": payload.get("user_id", ""),
-                    "project_id": payload.get("project_id", ""),
-                    "session_id": payload.get("session_id", str(uuid.uuid4())),
+                    "user_id": str(_claims["sub"]),
+                    "project_id": str(_claims["pid"]),
+                    "session_id": str(_claims["sid"]),
                     "settings": {},
                     "raw_data": {},
                     "analysis_result": None,

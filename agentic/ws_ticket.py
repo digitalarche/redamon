@@ -83,6 +83,12 @@ def check_ws_origin(origin: Optional[str], host: Optional[str], extra_allowed=No
     return origin_host == host_only
 
 
+def cors_allowlist():
+    """The agent's WS/CORS origin allowlist (same source as api.py's CORS)."""
+    default = "http://localhost:3000,http://127.0.0.1:3000"
+    return [o.strip() for o in os.getenv("AGENT_CORS_ORIGINS", default).split(",") if o.strip()]
+
+
 def authorize_ws(origin, host, ticket, extra_allowed=None):
     """Combined WS gate for the raw-proxy endpoints (kali terminal, cypherfix):
     same-origin check + fail-closed ticket verification.
