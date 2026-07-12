@@ -45,8 +45,15 @@ def _agent_post(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     import requests
 
     agent_url = os.environ.get("REDAMON_AGENT_URL", "http://agent:8080").rstrip("/")
+    # S8/I8: /graph/exec now requires internal auth. The worker presents the
+    # SCOPED SCANNER_API_KEY (never a master secret), which the agent's llm_guard
+    # accepts. Empty header in a token-less dev stack (agent fails open there).
+    headers = {}
+    scanner_key = os.environ.get("SCANNER_API_KEY", "").strip()
+    if scanner_key:
+        headers["X-Internal-Key"] = scanner_key
     try:
-        resp = requests.post(f"{agent_url}/graph/exec", json=payload, timeout=120)
+        resp = requests.post(f"{agent_url}/graph/exec", json=payload, headers=headers, timeout=120)
     except requests.RequestException as e:
         _eprint(f"redagraph: cannot reach agent at {agent_url}: {e}")
         sys.exit(4)

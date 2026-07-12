@@ -1076,7 +1076,7 @@ async def llm_takeover_classify(body: TakeoverClassifyRequest):
     }
 
 
-@app.post("/emergency-stop-all", tags=["System"])
+@app.post("/emergency-stop-all", tags=["System"], dependencies=[Depends(require_internal_auth)])
 async def emergency_stop_all():
     """Emergency stop: cancel every running agent task immediately."""
     if not ws_manager:
@@ -2775,12 +2775,22 @@ class GraphExecRequest(BaseModel):
     cypher: Optional[str] = None  # only for op="cypher"
 
 
-@app.post("/graph/exec", tags=["Graph"])
+@app.post("/graph/exec", tags=["Graph"], dependencies=[Depends(require_internal_auth)])
 async def graph_exec(body: GraphExecRequest):
     from graph_db.tenant_filter import find_disallowed_write_operation, inject_tenant_filter
 
     if not body.user_id or not body.project_id:
         return JSONResponse(status_code=400, content={"error": "missing tenant identity"})
+
+    # R12 (phased): the caller is now authenticated (require_internal_auth), but
+    # the tenant is still derived from the request BODY. Log the legacy body-
+    # identity use so the migration surface is observable; the enforce-flip
+    # (claim-derived tenant threaded from terminal->redagraph) is a tracked
+    # follow-on. A foothold inside the authenticated worker can still assert a
+    # tenant here — a strictly smaller surface than the prior anonymous LAN read.
+    logger.info(
+        "graph/exec: authenticated caller, body-identity tenant (R12 legacy path) "
+        "user=%s project=%s op=%s", body.user_id, body.project_id, body.op)
 
     op = body.op
     if op == "schema":

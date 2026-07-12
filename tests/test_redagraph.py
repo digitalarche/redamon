@@ -123,6 +123,8 @@ class TestFindDisallowedWriteOperation(unittest.TestCase):
         "CALL apoc.create.node([], {})": "apoc.create",
         "CALL apoc.cypher.runWrite('CREATE ()')": "apoc.cypher",
         "CALL dbms.security.createUser('a','b')": "dbms.",
+        # S8/E8: apoc.atomic.* mutates in place and must be blocked too.
+        "CALL apoc.atomic.add(n, 'x', 1)": "apoc.atomic",
     }
 
     def test_read_only_returns_none(self):
@@ -489,6 +491,40 @@ class TestReadInitFrame(unittest.TestCase):
         env, replay = self._run(ws, timeout=0.05)
         self.assertEqual(env, {})
         self.assertEqual(replay, b"")
+
+
+class TestRedagraphSendsScannerKey(unittest.TestCase):
+    """S8/I8: redagraph presents X-Internal-Key: SCANNER_API_KEY on /graph/exec."""
+
+    def _capture_post(self):
+        captured = {}
+
+        class _Resp:
+            status_code = 200
+            def json(self_inner):
+                return {"records": []}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            return _Resp()
+
+        return captured, fake_post
+
+    def test_sends_scanner_key_when_set(self):
+        captured, fake_post = self._capture_post()
+        with mock.patch("requests.post", fake_post), \
+             mock.patch.dict(os.environ, {"SCANNER_API_KEY": "scoped-key-xyz"}):
+            rg._agent_post({"op": "types", "user_id": "u", "project_id": "p"})
+        self.assertEqual(captured["headers"].get("X-Internal-Key"), "scoped-key-xyz")
+
+    def test_no_header_when_unset(self):
+        captured, fake_post = self._capture_post()
+        env = {k: v for k, v in os.environ.items() if k != "SCANNER_API_KEY"}
+        with mock.patch("requests.post", fake_post), \
+             mock.patch.dict(os.environ, env, clear=True):
+            rg._agent_post({"op": "types", "user_id": "u", "project_id": "p"})
+        self.assertNotIn("X-Internal-Key", captured["headers"])
 
 
 if __name__ == "__main__":

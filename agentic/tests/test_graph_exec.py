@@ -98,6 +98,24 @@ def main():
     resp = run(api.graph_exec(req(op="cypher", cypher="MATCH (n:Foo) RETURN n", user_id="", project_id="P")))
     check("missing tenant identity -> 400", resp.status_code == 400)
 
+    print("=== op=cypher blocks apoc.atomic.* (E8 residual, landed with S8) ===")
+    resp = run(api.graph_exec(req(op="cypher", cypher="MATCH (n:Foo) CALL apoc.atomic.add(n,'x',1) RETURN n", user_id="U", project_id="P")))
+    check("apoc.atomic.* rejected 403", resp.status_code == 403)
+
+    print("=== S8/I8/D7: /graph/exec and /emergency-stop-all require internal auth ===")
+    from llm_guard import require_internal_auth
+
+    def _route_deps(path):
+        for r in api.app.routes:
+            if getattr(r, "path", None) == path:
+                return [d.call for d in getattr(r, "dependant", None).dependencies] if getattr(r, "dependant", None) else []
+        return None
+
+    ge_deps = _route_deps("/graph/exec")
+    es_deps = _route_deps("/emergency-stop-all")
+    check("/graph/exec depends on require_internal_auth", ge_deps is not None and require_internal_auth in ge_deps)
+    check("/emergency-stop-all depends on require_internal_auth", es_deps is not None and require_internal_auth in es_deps)
+
     print()
     print(f"RESULT: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1

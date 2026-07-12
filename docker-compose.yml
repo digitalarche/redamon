@@ -572,6 +572,11 @@ services:
       # scoping server-side. Do not re-add NEO4J_PASSWORD here: a compromised
       # worker would otherwise get master read/write access to the whole graph.
       REDAMON_AGENT_URL: http://agent:8080
+      # S8/I8: /graph/exec now requires internal auth. The worker presents the
+      # SCOPED SCANNER_API_KEY (inbound-validation token, same category as
+      # MCP_AUTH_TOKEN) — NOT the master INTERNAL_API_KEY — so the "worker holds
+      # no master secrets" invariant is preserved. Fail-open if unset (dev).
+      SCANNER_API_KEY: "${SCANNER_API_KEY:-}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8000)); s.close()"]

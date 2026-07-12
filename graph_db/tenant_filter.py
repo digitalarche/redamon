@@ -20,7 +20,7 @@ _WRITE_CLAUSE_RE = re.compile(
 )
 
 _WRITE_PROCEDURE_RE = re.compile(
-    r'\bCALL\s+(apoc\.(create|merge|refactor|periodic|trigger|schema)|'
+    r'\bCALL\s+(apoc\.(create|merge|refactor|periodic|trigger|schema|atomic)|'
     r'apoc\.cypher\.(runWrite|doIt)|dbms\.)\b',
     re.IGNORECASE,
 )
