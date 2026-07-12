@@ -127,10 +127,11 @@ class InitMessage(BaseModel):
     project_id: str
     session_id: str
     graph_view_cypher: Optional[str] = None
-    # STRIDE S6: short-lived HS256 ticket minted by the webapp, binding the
+    # STRIDE S6/S2: short-lived HS256 ticket minted by the webapp, binding the
     # operator's authenticated identity to (user_id, project_id, session_id).
-    # Verified by the agent before the session is registered. Optional so that
-    # dev stacks without AGENT_WS_TICKET_SECRET still connect (fail-open).
+    # Verified by the agent before the session is registered. The field stays
+    # Optional on the wire, but handle_init now FAILS CLOSED: a missing/invalid
+    # ticket (or an unset AGENT_WS_TICKET_SECRET) is rejected, not trusted.
     ticket: Optional[str] = None
 
 
@@ -1051,13 +1052,14 @@ class WebSocketHandler:
         try:
             init_msg = InitMessage(**payload)
 
-            # STRIDE S6: verify the webapp-minted ticket and bind the session to
-            # the cryptographically attested identity. When a ticket secret is
-            # configured, a missing/invalid/expired ticket is rejected outright.
-            # When it is unset (dev), fail open with a one-time warning and trust
-            # the self-asserted identity (but authenticate() still refuses any
-            # unverified takeover of an existing session).
-            from ws_ticket import ticket_secret, verify_ws_ticket, warn_ticket_failopen_once
+            # STRIDE S6/S2: verify the webapp-minted ticket and bind the session
+            # to the cryptographically attested identity. A missing/invalid/
+            # expired ticket is rejected outright. When the ticket secret is UNSET
+            # we now FAIL CLOSED (STRIDE S2): reject the connection instead of
+            # trusting the self-asserted identity. redamon.sh ensure_auth_secrets
+            # always generates AGENT_WS_TICKET_SECRET, so real installs are
+            # unaffected; only a token-less dev stack is refused (by design).
+            from ws_ticket import ticket_secret, verify_ws_ticket
 
             secret = ticket_secret()
             user_id = init_msg.user_id
@@ -1065,27 +1067,31 @@ class WebSocketHandler:
             session_id = init_msg.session_id
             verified = False
 
-            if secret:
-                claims = verify_ws_ticket(init_msg.ticket, secret)
-                if claims is None:
-                    logger.warning("Rejected /ws/agent init: missing or invalid ticket")
-                    await connection.send_message(MessageType.ERROR, {
-                        "message": "WebSocket authentication failed",
-                        "recoverable": False,
-                    })
-                    try:
-                        await connection.websocket.close(
-                            code=1008, reason="Invalid or missing ticket")
-                    except Exception:
-                        pass
-                    return
-                # Identity comes from the verified ticket, not the client body.
-                user_id = str(claims["sub"])
-                project_id = str(claims["pid"])
-                session_id = str(claims["sid"])
-                verified = True
-            else:
-                warn_ticket_failopen_once()
+            async def _reject_ticket(reason: str):
+                logger.warning("Rejected /ws/agent init: %s", reason)
+                await connection.send_message(MessageType.ERROR, {
+                    "message": "WebSocket authentication failed",
+                    "recoverable": False,
+                })
+                try:
+                    await connection.websocket.close(code=1008, reason=reason)
+                except Exception:
+                    pass
+
+            if not secret:
+                # Fail closed: no secret configured means we cannot attest identity.
+                await _reject_ticket("ticket auth not configured")
+                return
+
+            claims = verify_ws_ticket(init_msg.ticket, secret)
+            if claims is None:
+                await _reject_ticket("Invalid or missing ticket")
+                return
+            # Identity comes from the verified ticket, not the client body.
+            user_id = str(claims["sub"])
+            project_id = str(claims["pid"])
+            session_id = str(claims["sid"])
+            verified = True
 
             # Authenticate connection
             await self.ws_manager.authenticate(

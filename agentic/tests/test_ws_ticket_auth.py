@@ -164,7 +164,10 @@ class AuthenticateTakeover(unittest.TestCase):
         asyncio.run(scenario())
 
     def test_new_unverified_session_still_allowed(self):
-        # Fail-open: a brand-new session (no collision) connects even unverified.
+        # The authenticate() layer permits a brand-new session (no collision)
+        # even when verified=False; the fail-closed gate lives one layer up in
+        # handle_init (see HandleInitFailClosed), which never passes verified=
+        # False to authenticate() anymore.
         async def scenario():
             mgr = WebSocketManager()
             conn = WebSocketConnection(_FakeWS())
@@ -173,6 +176,69 @@ class AuthenticateTakeover(unittest.TestCase):
             self.assertIs(mgr.active_connections["u:p:fresh"], conn)
 
         asyncio.run(scenario())
+
+
+# --- S2: handle_init fails closed on missing/invalid ticket ------------------
+try:
+    from websocket_api import WebSocketHandler
+    _HAVE_HANDLER = True
+except Exception:  # pragma: no cover
+    _HAVE_HANDLER = False
+
+
+@unittest.skipUnless(_HAVE_WS and _HAVE_HANDLER, "agent deps unavailable (run in-container)")
+class HandleInitFailClosed(unittest.TestCase):
+    """STRIDE S2: /ws/agent init rejects when the ticket secret is unset or the
+    ticket is missing/invalid, instead of trusting the self-asserted identity."""
+
+    def _run_init(self, payload, secret_env):
+        prev = os.environ.get("AGENT_WS_TICKET_SECRET")
+        if secret_env is None:
+            os.environ.pop("AGENT_WS_TICKET_SECRET", None)
+        else:
+            os.environ["AGENT_WS_TICKET_SECRET"] = secret_env
+        try:
+            async def scenario():
+                mgr = WebSocketManager()
+                handler = WebSocketHandler(orchestrator=None, ws_manager=mgr)
+                conn = WebSocketConnection(_FakeWS())
+                await handler.handle_init(conn, payload)
+                return conn, mgr
+            return asyncio.run(scenario())
+        finally:
+            if prev is None:
+                os.environ.pop("AGENT_WS_TICKET_SECRET", None)
+            else:
+                os.environ["AGENT_WS_TICKET_SECRET"] = prev
+
+    def test_ws_agent_rejects_when_secret_unset(self):
+        # Secret UNSET -> reject (was: fail-open trust of self-asserted identity).
+        conn, mgr = self._run_init(
+            {"user_id": "victim", "project_id": "p", "session_id": "s"},
+            secret_env=None)
+        self.assertFalse(conn.authenticated)
+        self.assertTrue(conn.websocket.closed)
+        self.assertEqual(conn.websocket.close_code, 1008)
+        self.assertEqual(mgr.active_connections, {})
+
+    def test_ws_agent_rejects_missing_ticket_when_secret_set(self):
+        conn, mgr = self._run_init(
+            {"user_id": "victim", "project_id": "p", "session_id": "s"},
+            secret_env=SECRET)
+        self.assertFalse(conn.authenticated)
+        self.assertTrue(conn.websocket.closed)
+        self.assertEqual(conn.websocket.close_code, 1008)
+
+    def test_ws_agent_accepts_valid_ticket_and_binds_claims(self):
+        ticket = _sign(_claims(sub="realuser", pid="realproj", sid="realsess"))
+        conn, mgr = self._run_init(
+            {"user_id": "spoofed", "project_id": "spoofed", "session_id": "realsess",
+             "ticket": ticket},
+            secret_env=SECRET)
+        # Identity is bound to the VERIFIED claims, not the self-asserted body.
+        self.assertTrue(conn.authenticated)
+        self.assertEqual(conn.user_id, "realuser")
+        self.assertEqual(conn.project_id, "realproj")
 
 
 if __name__ == "__main__":
