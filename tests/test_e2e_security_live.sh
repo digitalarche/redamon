@@ -56,6 +56,17 @@ fi
 del_user "$S6_UID"
 
 echo
+echo "#### S3/S4 (/ws/kali-terminal + /ws/cypherfix-* ticket + same-origin gate) ####"
+# Runs inside the agent container (has websockets + AGENT_WS_TICKET_SECRET); mints
+# a valid ticket locally and asserts unticketed/cross-origin are rejected and a
+# valid ticket is accepted, for all three endpoints.
+if docker compose exec -T agent python3 - < agentic/tests/live_ws_endpoints_probe.py; then
+  echo ">> S3/S4 WS gate: OK"
+else
+  echo ">> S3/S4 WS gate: FAILURES ABOVE"; FAIL=1
+fi
+
+echo
 echo "#### I19/S14 (:8015 bearer auth, boot force-down, settings activation gate) ####"
 TOKEN=$(docker compose exec -T webapp printenv TUNNEL_AUTH_TOKEN | tr -d '\r\n')
 pass=0; total=0
