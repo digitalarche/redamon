@@ -117,8 +117,46 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 })
     }
 
+    // D10: zip-bomb defense. Cap the upload size, the total DECLARED uncompressed
+    // size, and the entry count BEFORE decompressing any entry, so a small crafted
+    // archive cannot inflate to tens of GB and OOM-kill the webapp (mem_limit 1g).
+    // Caps are sized generously off the real export shape (tens of MB uncompressed)
+    // and env-overridable.
+    const MAX_UPLOAD_BYTES = parseInt(process.env.PROJECT_IMPORT_MAX_UPLOAD_BYTES || '', 10) || 100 * 1024 * 1024
+    const MAX_UNCOMPRESSED_BYTES = parseInt(process.env.PROJECT_IMPORT_MAX_UNCOMPRESSED_BYTES || '', 10) || 500 * 1024 * 1024
+    const MAX_ENTRIES = parseInt(process.env.PROJECT_IMPORT_MAX_ENTRIES || '', 10) || 5000
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json(
+        { error: `Upload too large (${file.size} bytes; max ${MAX_UPLOAD_BYTES})` },
+        { status: 413 }
+      )
+    }
+
     const arrayBuffer = await file.arrayBuffer()
     const zip = await JSZip.loadAsync(arrayBuffer)
+
+    // Enforce entry-count + total declared uncompressed size from the central
+    // directory (available without decompressing).
+    let entryCount = 0
+    let declaredUncompressed = 0
+    zip.forEach((_path, entry) => {
+      entryCount += 1
+      const sz = (entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize
+      if (typeof sz === 'number' && sz > 0) declaredUncompressed += sz
+    })
+    if (entryCount > MAX_ENTRIES) {
+      return NextResponse.json(
+        { error: `Archive has too many entries (${entryCount}; max ${MAX_ENTRIES})` },
+        { status: 400 }
+      )
+    }
+    if (declaredUncompressed > MAX_UNCOMPRESSED_BYTES) {
+      return NextResponse.json(
+        { error: `Archive decompresses too large (${declaredUncompressed} bytes; max ${MAX_UNCOMPRESSED_BYTES})` },
+        { status: 400 }
+      )
+    }
 
     // Read and validate manifest
     const manifestFile = zip.file('manifest.json')

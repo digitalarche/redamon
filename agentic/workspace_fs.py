@@ -33,6 +33,17 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _int_env(name: str, default: int) -> int:
+    """Read a positive-int env var; fall back to default on unset/invalid so a
+    typo can never disable a safety cap (D10)."""
+    try:
+        v = int(str(os.environ.get(name, "")).strip())
+        return v if v > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
 # In-memory undo stack: absolute path -> list of pre-edit byte snapshots.
@@ -1046,29 +1057,60 @@ async def fs_extract(archive_path: str, dest: str, format: str = "auto") -> str:
         candidate = (dest_p / member_name).resolve()
         return candidate == dest_resolved or dest_resolved in candidate.parents
 
+    # D10: zip/tar-bomb defense. Cap entry count and total DECLARED uncompressed
+    # size before extracting, and stream the gz path with a byte ceiling, so a
+    # small crafted archive cannot inflate to tens of GB and OOM the agent. Env-
+    # overridable with generous defaults.
+    max_entries = _int_env("FS_EXTRACT_MAX_ENTRIES", 5000)
+    max_total = _int_env("FS_EXTRACT_MAX_TOTAL_BYTES", 500 * 1024 * 1024)
+
     if fmt == "tar":
         with tarfile.open(archive, "r:*") as tf:
-            names = tf.getnames()
-            for n in names:
-                if not _safe(n):
-                    return f"Error: tar-slip attempt detected for entry '{n}'. Aborted."
+            members = tf.getmembers()
+            if len(members) > max_entries:
+                return f"Error: archive has too many entries ({len(members)}; max {max_entries}). Aborted."
+            total = sum(max(0, m.size) for m in members)
+            if total > max_total:
+                return f"Error: archive decompresses too large ({total} bytes; max {max_total}). Aborted."
+            for m in members:
+                if not _safe(m.name):
+                    return f"Error: tar-slip attempt detected for entry '{m.name}'. Aborted."
             tf.extractall(dest_p)
-            return f"Extracted {len(names)} entries from {archive_path} -> {dest}."
+            return f"Extracted {len(members)} entries from {archive_path} -> {dest}."
     if fmt == "zip":
         with zipfile.ZipFile(archive, "r") as zf:
-            names = zf.namelist()
-            for n in names:
-                if not _safe(n):
-                    return f"Error: zip-slip attempt detected for entry '{n}'. Aborted."
+            infos = zf.infolist()
+            if len(infos) > max_entries:
+                return f"Error: archive has too many entries ({len(infos)}; max {max_entries}). Aborted."
+            total = sum(max(0, i.file_size) for i in infos)
+            if total > max_total:
+                return f"Error: archive decompresses too large ({total} bytes; max {max_total}). Aborted."
+            for i in infos:
+                if not _safe(i.filename):
+                    return f"Error: zip-slip attempt detected for entry '{i.filename}'. Aborted."
             zf.extractall(dest_p)
-            return f"Extracted {len(names)} entries from {archive_path} -> {dest}."
+            return f"Extracted {len(infos)} entries from {archive_path} -> {dest}."
     if fmt == "gz":
         out_name = archive.stem  # strips trailing .gz
         out_path = (dest_p / out_name).resolve()
         if out_path != dest_resolved and dest_resolved not in out_path.parents:
             return "Error: extraction would escape dest."
+        # gz carries no reliable declared size; stream with a hard byte ceiling.
+        written = 0
         with gzip.open(archive, "rb") as gz, out_path.open("wb") as out:
-            shutil.copyfileobj(gz, out)
+            while True:
+                chunk = gz.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_total:
+                    out.close()
+                    try:
+                        out_path.unlink()
+                    except Exception:
+                        pass
+                    return f"Error: gz stream exceeds max size ({max_total} bytes). Aborted."
+                out.write(chunk)
         return f"Extracted 1 file from {archive_path} -> {dest}/{out_name}."
     return f"Error: unsupported format '{format}'."
 
