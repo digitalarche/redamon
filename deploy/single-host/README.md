@@ -124,6 +124,7 @@ flag it manages. Control KB with `ENABLE_KB` only.
 | `REDAMON_BUILD_PARALLEL` | Cap concurrent image builds. Blank -> redamon.sh auto-sizes. |
 | `DOCKER_DNS` | e.g. `8.8.8.8,8.8.4.4` merged into `/etc/docker/daemon.json` if container DNS breaks. |
 | `DOCKER_BUILD_CACHE_MAX_GB` | Cap the BuildKit build cache (GB) via `daemon.json` auto-GC. Blank -> Docker's default. `update` reuses but never prunes the cache, so it grows unbounded; set e.g. `30` to bound it without slowing incremental rebuilds. |
+| `<SERVICE>_CPUS` | Per-service CPU limit (`NEO4J_CPUS`, `KALI_CPUS`, `AGENT_CPUS`, ...). Auto-capped at `init` to `min(compose default, host nproc)` so `up` never fails on a box with fewer CPUs than compose's generous defaults (neo4j 8 / kali 10 / agent 8). Set one to pin it; blank -> auto. |
 
 ### Engagement knobs
 | Key | Purpose |

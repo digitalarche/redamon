@@ -380,6 +380,29 @@ seed KB_EMBEDDING_USE_API "\${KB_EMBEDDING_USE_API}"
 seed KB_EMBEDDING_API_BASE_URL "\${KB_EMBEDDING_API_BASE_URL}"
 seed KB_EMBEDDING_API_KEY "\${KB_EMBEDDING_API_KEY}"
 seed TUNNELS_ENABLED "\${TUNNELS_ENABLED}"
+
+# Cap each per-service CPU limit to the host's CPU count. compose sets generous
+# \`cpus:\` defaults (neo4j 8, kali 10, agent 8) that assume a big host; Docker
+# REFUSES to create a container whose cpus limit exceeds the host's CPU count, so
+# on a 4-vCPU box \`up\` dies with "range of CPUs is from 0.01 to N.00". Seed
+# min(default, nproc) so it auto-fits any instance; skip any value the operator
+# already pinned in .env. \`cpus:\` is a limit not a reservation, so capping to
+# nproc loses nothing (nproc was already the physical ceiling).
+NPROC=\$(nproc 2>/dev/null || echo 1)
+cap_cpus() {  # key generous_default
+  local k="\$1" d="\$2"
+  local v="\$d"                               # separate stmt: \$d isn't set within its own 'local'
+  grep -q "^\$k=" .env && return 0            # respect an operator override
+  [ "\$d" -gt "\$NPROC" ] && v="\$NPROC"
+  seed "\$k" "\$v"
+}
+cap_cpus POSTGRES_CPUS 4
+cap_cpus NEO4J_CPUS 8
+cap_cpus KALI_CPUS 10
+cap_cpus RECON_ORCHESTRATOR_CPUS 4
+cap_cpus AGENT_CPUS 8
+cap_cpus WEBAPP_CPUS 4
+cap_cpus DOCKER_BROKER_CPUS 2
 chmod 600 .env
 success "Checkout ready"
 EOF
