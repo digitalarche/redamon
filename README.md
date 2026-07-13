@@ -143,11 +143,13 @@ That's it. No Node.js, Python, or security tools needed on your host.
 |----------|----------------|--------------------------|
 | **CPU** | 2 cores | 4 cores |
 | **RAM** | 4 GB | 8 GB (16 GB recommended) |
-| **Disk** | 20 GB free | 50 GB free |
+| **Disk** | 100 GB free | 150 GB free |
 
 > **Without OpenVAS** runs 7 containers: webapp, postgres, neo4j, agent, kali-sandbox, recon-orchestrator, and docker-broker (a filtering Docker-socket proxy that the recon orchestrator's spawned scan containers go through, so they can only launch the known tool images).
 > **With OpenVAS** adds 4 more runtime containers (gvmd, ospd-openvas, gvm-postgres, gvm-redis) plus ~8 one-shot data-init containers for vulnerability feeds (~170K+ NVTs). First launch takes ~30 minutes for GVM feed synchronization.
 > Dynamic recon and scan containers are spawned on-demand during operations and require additional resources.
+
+> **Disk sizing for a real deployment.** The figures above are bare minimums to build and run the stack (fixed platform footprint: ~90 GB without OpenVAS, ~120 GB with). For an **always-on server running real engagements**, add **~100 GB of free space for operational data** - the Neo4j attack graph, scan artifacts/outputs, Postgres, and container logs all grow with use. That means **200 GB without OpenVAS, 250 GB with OpenVAS**, each leaving roughly 100 GB free for operations. See the [deployment guide](https://github.com/samugit83/redamon/wiki/Deploying-to-a-Server) for the full breakdown.
 
 ### 1. Clone & Install
 

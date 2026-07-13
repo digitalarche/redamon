@@ -46,12 +46,18 @@ RedAmon is heavy. `redamon.sh` enforces a hard **8 GB** Docker-visible RAM floor
 
 | Profile | vCPU | RAM | Disk | Example | Notes |
 |---|---|---|---|---|---|
-| Bare minimum (core only, no GVM/KB) | 2 | 8 GB | 50 GB | t3.large | Passes the gate; slow/swappy. Keep swap on. |
-| Recommended (core + occasional scans) | 4 | 16 GB | 60-80 GB | m5.xlarge | Sane default. |
-| Full (GVM + KB + Ollama judge + parallel scans) | 8 | 32 GB | 100-120 GB | m5.2xlarge | Ollama alone needs ~5-6 GB while scanning. |
+| Bare minimum (core only, no GVM/KB) | 2 | 8 GB | 100 GB | t3.large | Fits the ~90 GB platform footprint with almost no operational headroom. Cap the build cache (`DOCKER_BUILD_CACHE_MAX_GB`) or the parallel build can hit 100%. Slow/swappy; keep swap on. |
+| Recommended (core + real scans, no GVM) | 4 | 16 GB | 200 GB | m5.xlarge | ~90 GB platform + ~100 GB free for operational data. Sane default. |
+| Full (GVM + KB + Ollama judge + parallel scans) | 8 | 32 GB | 250 GB | m5.2xlarge | ~120 GB platform + ~100 GB operational. Ollama alone needs ~5-6 GB RAM while scanning. |
 
-Budget **60 GB disk minimum, 100 GB for the full profile** (kali-sandbox ~12-15 GB, agent
-image ~7-10 GB, plus feeds/models/DB data/build cache).
+**Disk sizing.** The fixed platform footprint is **~90 GB without GVM** (OS ~9 GB + the 13 built
+images ~60 GB + build cache ~20 GB) and **~120 GB with GVM** (its images plus the
+vulnerability-feed volumes/DB add ~25-30 GB, and those grow on every feed update). On top of
+that, budget **~100 GB of free space for operational data** - the Neo4j attack graph, scan
+artifacts/outputs, Postgres, and container logs all grow with use. That lands at **200 GB
+without GVM, 250 GB with GVM**, each leaving roughly 100 GB free for operations. gp3 EBS
+resizes online, so you can start smaller and grow in place. Set `DOCKER_BUILD_CACHE_MAX_GB` so
+the build cache (which `update` reuses but never prunes) can't slowly eat that headroom.
 
 ## The `.env` reference (every variable)
 
